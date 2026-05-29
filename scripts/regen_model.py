@@ -92,12 +92,18 @@ def collect_properties(schemata: dict[str, dict[str, Any]], schema_name: str) ->
                 continue
             seen.add(prop_name)
             field_name, alias = _safe_field_name(prop_name)
+            description = (prop_def.get("description") or "").strip()
+            label = (prop_def.get("label") or "").strip()
+            # The DEPRECATED comment uses the real description (may be empty);
+            # the Field(description=...) falls back to label → identifier so
+            # IDE hover always shows something useful, even on terse props.
             properties.append(
                 {
                     "name": prop_name,
                     "field_name": field_name,
                     "alias": alias,
-                    "description": (prop_def.get("description") or "").strip(),
+                    "description": description,
+                    "field_description": description or label or prop_name,
                     "deprecated": bool(prop_def.get("deprecated", False)),
                     "from_schema": ancestor,
                 }

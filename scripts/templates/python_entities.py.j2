@@ -21,14 +21,10 @@ class {{ schema.name }}(_EntityBase):
 {% if prop.deprecated %}
     # DEPRECATED{% if prop.description %}: {{ prop.description }}{% endif %}
 {% endif %}
-{% if prop.alias and prop.description %}
-    {{ prop.field_name }}: list[str] = Field(default_factory=list, alias={{ prop.alias | py_str }}, description={{ prop.description | py_str }})
-{% elif prop.alias %}
-    {{ prop.field_name }}: list[str] = Field(default_factory=list, alias={{ prop.alias | py_str }})
-{% elif prop.description %}
-    {{ prop.field_name }}: list[str] = Field(default_factory=list, description={{ prop.description | py_str }})
+{% if prop.alias %}
+    {{ prop.field_name }}: list[str] = Field(default_factory=list, alias={{ prop.alias | py_str }}, description={{ prop.field_description | py_str }})
 {% else %}
-    {{ prop.field_name }}: list[str] = Field(default_factory=list)
+    {{ prop.field_name }}: list[str] = Field(default_factory=list, description={{ prop.field_description | py_str }})
 {% endif %}
 {% endfor %}
 
