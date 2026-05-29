@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "yente-client"
+version = "0.0.1"
+description = "Client SDK for the yente / OpenSanctions matching API."
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "OpenSanctions" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pydantic>=2.5,<3",
+    "httpx>=0.27,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+    "respx>=0.21",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "jinja2>=3",
+]
+
+[project.urls]
+Homepage = "https://github.com/pudo/yenteclient"
+Repository = "https://github.com/pudo/yenteclient"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yente_client"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# Generated files (entities/_generated.py, entities/__init__.py,
+# schemas/_literals.py) carry a `# ruff: noqa` header from the template
+# rather than being excluded here.
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["src/yente_client"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
