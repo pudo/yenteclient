@@ -19,7 +19,7 @@ class {{ schema.name }}(_EntityBase):
 
 {% for prop in schema.properties %}
 {% if prop.deprecated %}
-    # DEPRECATED{% if prop.description %}: {{ prop.description }}{% endif %}
+    # DEPRECATED{% if prop.description %}: {{ prop.description }}{% endif +%}
 {% endif %}
 {% if prop.alias %}
     {{ prop.field_name }}: list[str] = Field(default_factory=list, alias={{ prop.alias | py_str }}, description={{ prop.field_description | py_str }})

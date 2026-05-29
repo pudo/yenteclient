@@ -90,6 +90,11 @@ def collect_properties(schemata: dict[str, dict[str, Any]], schema_name: str) ->
         for prop_name, prop_def in anc_props.items():
             if prop_name in seen:
                 continue
+            # Stub properties are the reverse side of directed entity edges
+            # (e.g. Address.things ← Thing.addressEntity). They never make
+            # sense on a query payload, so we omit them from the input class.
+            if prop_def.get("stub"):
+                continue
             seen.add(prop_name)
             field_name, alias = _safe_field_name(prop_name)
             description = (prop_def.get("description") or "").strip()

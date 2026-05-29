@@ -126,3 +126,21 @@ def test_property_type_literal() -> None:
 def test_gender_literal() -> None:
     args = Gender.__args__  # type: ignore[attr-defined]
     assert set(args) == {"female", "male", "other"}
+
+
+def test_stub_properties_excluded() -> None:
+    """Reverse-side ("stub") entity properties are noise on a query payload;
+    we exclude them from the generated input class so users only see fields
+    they can meaningfully set."""
+    # `images`, `associates`, `familyPerson`, `employers` are all stub=True
+    # on Person in model.json — they should NOT be fields on the class.
+    assert "images" not in Person.model_fields
+    assert "associates" not in Person.model_fields
+    assert "familyPerson" not in Person.model_fields
+    assert "employers" not in Person.model_fields
+    # Forward-direction entity properties (non-stub) remain — `parent` is
+    # the one non-stub entity property on Person (inherited from LegalEntity).
+    assert "parent" in Person.model_fields
+    # Stubs hitting extra="forbid" gives a clear ValidationError.
+    with pytest.raises(ValidationError):
+        Person(images=["some-id"])
