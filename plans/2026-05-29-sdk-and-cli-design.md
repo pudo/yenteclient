@@ -390,12 +390,51 @@ Every `APIError` carries `.status_code`, `.detail` (from the response body), and
 
 ### 4.6 HTTP, redirects, retries, timeouts
 
+**Constructor surface (M2):**
+
+```python
+class Client:
+    def __init__(
+        self,
+        *,
+        # Auth / URL
+        api_key: str | None = None,
+        base_url: str = "https://api.opensanctions.org",
+
+        # User-Agent
+        app_name: str | None = None,                 # caller's app identifier, no version
+        user_agent: str | None = None,               # escape hatch; overrides default UA entirely
+
+        # HTTP behaviour
+        timeout: float | httpx.Timeout | None = None,
+        verify: bool | str = True,                   # SSL: False, or path to CA bundle
+        proxy: str | None = None,                    # singular per httpx 0.27+
+        headers: dict[str, str] | None = None,       # merged onto every request
+
+        # Retry
+        retry: RetryPolicy | None = None,
+
+        # Test seam
+        transport: httpx.BaseTransport | None = None,
+    ) -> None: ...
+```
+
+**Behaviour:**
+
 - **Transport:** `httpx.Client` / `AsyncClient` with `follow_redirects=True`. The `308` on `/entities/{referent}` → `/entities/{canonical}` is followed transparently.
-- **Timeout:** default `httpx.Timeout(30.0, connect=10.0)`; overridable via `Client(timeout=...)`.
-- **Retries:** HTTP-level retries on 429, 502, 503, 504 with exponential backoff (base 0.5s, factor 2, max 4 attempts, max delay 16s, full jitter). Honors `Retry-After` on 429. Configurable via `Client(retry=RetryPolicy(...))`. Connection-level retries are httpx's default.
+- **Timeout:** default `httpx.Timeout(30.0, connect=10.0)`; overridable via `timeout=`.
+- **Retries:** HTTP-level retries on 429, 502, 503, 504 with exponential backoff (base 0.5s, factor 2, max 4 attempts, max delay 16s, full jitter). Honors `Retry-After` on 429. Configurable via `retry=RetryPolicy(...)`. Connection-level retries stay at httpx's default.
 - **Auth header:** when `api_key` is set, attach `Authorization: ApiKey {key}` to every request. When missing and `base_url` points at `api.opensanctions.org`, emit `warnings.warn` once — not an exception (self-hosted setups don't need keys).
-- **User-Agent:** `yente-client/{version} python/{py_version}`.
+- **User-Agent:** RFC-7231 bracket-comment form. The product is always `yente-client/{ver}`; caller's `app_name` and runtime versions sit in the parenthesised comment:
+  - No `app_name`: `yente-client/0.0.1 (python/3.12.5; httpx/0.28.1)`
+  - With `app_name="MyScreeningApp"`: `yente-client/0.0.1 (MyScreeningApp; python/3.12.5; httpx/0.28.1)`
+  - With `user_agent=...`: the whole string is replaced verbatim (no concat). `app_name` is ignored in that case.
+
+  Versions come from `importlib.metadata.version("yente-client")` and `httpx.__version__` at import time — no hand-edited `_version.py`. `app_name` is validated to reject characters that would break UA grammar (whitespace, parens, semicolons); invalid values raise `ConfigurationError` at construct time.
+
+- **Headers:** caller-supplied `headers=` are merged onto every request; `Authorization` and `User-Agent` set by the client take precedence (caller can't accidentally clobber them, since auth/UA are applied last).
 - **List query parameters:** httpx serialises `list[str]` as repeated keys natively (`include_dataset=a&include_dataset=b`); we always pass lists.
+- **Test seam:** `transport=` accepts `httpx.MockTransport` (or `httpx.AsyncBaseTransport` for the async client) so `respx`-driven tests can intercept without monkey-patching.
 
 ### 4.7 One HTTP call per match — never wire-level batching
 
