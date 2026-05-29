@@ -45,7 +45,7 @@ Deferred to a later iteration: `/reconcile/*`, `/statements`, `/updatez`.
 ```
 yenteclient/
 ├── README.md                        # what this is, links to python/ and typescript/
-├── Makefile                         # regen-model, lint, test
+├── Makefile                         # regen-model, test
 ├── plans/                           # design docs (this file lives here)
 ├── model/
 │   └── model.json                   # canonical FtM model snapshot, committed
@@ -67,13 +67,14 @@ yenteclient/
 │   │   ├── filters.py               # _CommonFilters, MatchFilters, SearchFilters
 │   │   ├── exceptions.py            # YenteError hierarchy
 │   │   ├── entities/
-│   │   │   ├── __init__.py          # re-exports every schema class
-│   │   │   ├── _base.py             # _EntityBase (BaseModel), generic Entity escape hatch, _ensure_list
+│   │   │   ├── __init__.py          # re-exports every schema class (regenerated)
+│   │   │   ├── _base.py             # _EntityBase, EntityInput TypeAlias, _ensure_list
 │   │   │   └── _generated.py        # 69 per-schema BaseModels; REGENERATED, do not edit by hand
 │   │   ├── schemas/
-│   │   │   ├── __init__.py          # lazy-loads model.json; exposes schemata, types, target_topics
+│   │   │   ├── __init__.py          # exposes the raw model dict + lookup helpers
+│   │   │   ├── _lookup.py           # has_schema, iter_properties, is_a, is_deprecated
 │   │   │   ├── model.json           # copied from /model/model.json by regen
-│   │   │   └── _literals.py         # generated Schema / PropertyType / Topic Literal types
+│   │   │   └── _literals.py         # generated Schema / PropertyType / Topic / Gender Literal types
 │   │   ├── cli/
 │   │   │   ├── __init__.py
 │   │   │   ├── main.py              # `yente` entrypoint (Typer app)
@@ -168,8 +169,7 @@ async with AsyncClient(api_key="...") as ac:
 
 - **Filter kwargs and `filters=` are merged** — kwargs override fields on a passed-in `MatchFilters` (or `SearchFilters` for `search`). Conflicting include/exclude (same value in `datasets` and `exclude_datasets`, etc.) raises `ValidationError` client-side before the HTTP call. Passing a search-only kwarg to `match` (or vice versa) is also a `ValidationError`.
 - **`datasets` is `str | list[str] | dict`** — `"sanctions"` and `["sanctions"]` are equivalent. A `dict` is accepted for forward-compatibility with the planned dataset DSL (ftm #272); today it's serialized verbatim and the server may reject it, that's fine.
-- **`topics` aliases** — `"risk"` (any target topic) and `"all"` (target + enrich) resolve client-side to the full list from the bundled model. See §10 for the rationale.
-- **Structural pre-validation (names only)** — constructing a `Person` with an unknown kwarg raises immediately (`extra="forbid"` on every entity class). Same goes for an unknown `schema=` on the generic `Entity`. This matches v2's planned "400 on invalid properties" behaviour without a round-trip.
+- **Structural pre-validation (names only)** — constructing a `Person` with an unknown kwarg raises immediately (`extra="forbid"` on every entity class). This matches v2's planned "400 on invalid properties" behaviour without a round-trip.
 - **No value-level cleaning client-side** — we pass property values straight to the wire (after `str → list[str]` normalisation, which is type adaptation, not validation). Date parsing, name cleaning, country canonicalisation, identifier checksums, etc. are deliberately not attempted: doing them properly requires `normality` + `rigour` + the rest of the FtM stack, and an inexact reimplementation would be a footgun ("the SDK said it was valid, the server returned 400"). The server is the source of truth on values; the SDK ships errors back unchanged.
 
 ### 4.2 Type system — bundled FtM model + per-schema codegen
@@ -220,8 +220,6 @@ class Person(_EntityBase):
     # ... all own + inherited properties, flat ...
 
     _coerce = field_validator("*", mode="before")(_ensure_list)
-    _warn_deprecated = model_validator(mode="after")(_warn_if_deprecated_set)
-    _DEPRECATED: ClassVar[frozenset[str]] = frozenset({"secondName"})
 
 
 class Company(_EntityBase):
@@ -240,47 +238,32 @@ Properties of note:
 - **`list[str]` everywhere** — one wildcard `field_validator` normalises `str → [str]` so users can pass either.
 - **`extra="forbid"`** — typos fail at construction, matching v2's planned 400-on-unknown-property behaviour.
 - **Name-only validation, never values** — `extra="forbid"` rejects unknown kwargs (typos, properties not on the schema). Values are accepted as-is and forwarded. Proper value cleaning needs `normality` + `rigour` and is the server's job; a half-reimplementation would diverge over time and turn the SDK into an unreliable gate.
-- **Deprecation surfacing** — two channels:
-  1. **Codegen-time:** properties marked `deprecated: true` in the model get a `# DEPRECATED: <description>` line above the field in the generated source.
-  2. **Runtime:** a per-class `_DEPRECATED` ClassVar lists the property names; a `model_validator(mode="after")` emits `DeprecationWarning` for any deprecated property that received a non-empty value. (The wildcard `_coerce` validator stays single-purpose — `str → list[str]` only.)
+- **Deprecation surfacing (codegen-time only)** — properties marked `deprecated: true` in the model get a `# DEPRECATED: <description>` line above the field in the generated source. Shows up in IDE hover and code diffs. A runtime `DeprecationWarning` channel was considered and dropped for now — the codegen comment is sufficient signal until users ask for more.
 
-#### 4.2.2 Generic `Entity` escape hatch
+#### 4.2.2 Runtime introspection
 
-For dynamic input (schema chosen at runtime, properties coming from a config), keep a generic class. It is structurally different from the per-schema classes — properties go into a single `properties: dict[str, list[str]]` field instead of being typed kwargs — but it inherits from the same `_EntityBase` so `match()` accepts it uniformly via the `EntityInput` alias.
+The `schemas/` package loads `model.json` at import time (~150 KB; cheap) and exposes the raw dict plus a few helpers. No Pydantic-typed wrappers — the codegen reads `model.json` directly, and users who want introspection get dict access:
 
 ```python
-from yente_client import Entity
+from yente_client.schemas import model, has_schema, is_a, iter_properties, is_deprecated
 
-e = Entity(schema="Vessel", properties={"name": ["MV Acme"], "imoNumber": ["1234567"]})
-client.match(e, datasets=["sanctions"])
+model["schemata"]["Person"]["properties"]["birthDate"]["type"]     # "date"
+has_schema("Person")                                                # True
+is_a("LegalEntity", "Thing")                                        # True
+list(iter_properties("Person"))                                     # ["birthDate", "country", ...]
+is_deprecated("Person", "secondName")                               # True
+"sanction" in model["types"]["topic"]["values"]                     # True (full topic enum)
 ```
 
-Construction validates the `schema=` name against `model.schemata` and every property name against `model.schemata[<schema>].properties`; unknown names raise `ValidationError`. Use `Entity` only when per-schema typing isn't possible (config-driven, fully dynamic input). The per-schema class is always preferred and gives IDE autocomplete.
-
-**Naming note:** the input `Entity` takes the schema as a constructor kwarg `schema=` (with `populate_by_name=True`, `schema_=` also works). The *response* `Entity` in §4.3 is a separate class with a `schema_: str = Field(alias="schema")` field — the wire JSON uses `"schema"` in both directions; the Python identifier differs only because the response model lifts schema into a regular field while the input class uses a `ClassVar` discriminator on the per-schema subclasses.
-
-#### 4.2.3 Runtime introspection
-
-```python
-from yente_client.schemas import model, is_a
-
-model.schemata["Person"].properties["birthDate"].type   # "date"
-is_a("LegalEntity", "Thing")                            # True
-"sanction" in model.target_topics                       # True
-```
-
-The schemas module loads `model.json` lazily on first access. It's small (~150 KB) and cheap to keep parsed.
-
-#### 4.2.4 Codegen pipeline
+#### 4.2.3 Codegen pipeline
 
 `scripts/regen_model.py` (plain stdlib `urllib` + `jinja2` for templating + `ruff format` as a postprocess; no FtM dep, no `wrangle` env coupling):
 
 1. Fetch `https://data.opensanctions.org/meta/model.json`, write `model/model.json`.
 2. Copy to `python/src/yente_client/schemas/model.json` and `typescript/src/model.json`.
 3. Render `python/src/yente_client/entities/_generated.py` from `python_entities.py.j2`: one class per schema, properties flattened across `schemata`, deprecation markers preserved.
-4. Render `python/src/yente_client/schemas/_literals.py` from `python_literals.py.j2`: `Schema = Literal["Person", ...]`, `PropertyType = Literal[...]`, `TargetTopic = Literal[...]`, `EnrichTopic = Literal[...]`.
-5. Render the equivalent TS artefacts from `ts_entities.ts.j2` and `ts_literals.ts.j2`.
-6. Run `ruff format` on the Python output and `prettier` on the TS output.
+4. Render `python/src/yente_client/schemas/_literals.py` from `python_literals.py.j2`: `Schema = Literal["Person", ...]`, `PropertyType = Literal[...]`, `Topic = Literal[...]` (full 71-value enum from `model.types["topic"].values`), `Gender = Literal[...]`.
+5. Run `ruff format` on the Python output. (TypeScript codegen lands with the TS SDK milestone — see §9.)
 
 CI runs `python scripts/regen_model.py --check` and fails if any committed artefact differs from what the live model would generate. Upstream drift then surfaces as a normal PR review — release notes can call out additions, deprecations, removals.
 
@@ -309,9 +292,6 @@ class ScoredEntity(Entity):
     match: bool
     explanations: dict[str, FeatureResult] = {}
 
-    def why(self) -> str:
-        """Human-readable, one-line-per-feature summary of explanations."""
-
 
 class MatchResponse(BaseModel):
     """v2-shaped flat response. The v1 `responses[key]` envelope is unwrapped in the call layer."""
@@ -324,10 +304,6 @@ class MatchResponse(BaseModel):
     def top(self) -> ScoredEntity | None: ...        # highest-scoring result, or None
     @property
     def matches(self) -> list[ScoredEntity]: ...     # filtered to match=True
-    @property
-    def targets(self) -> list[ScoredEntity]: ...     # filtered to target=True
-    def __iter__(self) -> Iterator[ScoredEntity]: ...
-    def __len__(self) -> int: ...
 
 
 class SearchResponse(BaseModel):
@@ -347,34 +323,32 @@ The recursive `Entity` (nested entities inside `properties`) is the only structu
 ```python
 class _CommonFilters(BaseModel):
     """Shared by MatchFilters and SearchFilters; do not use directly."""
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    datasets:         list[str] | dict | None = None     # accepts future dataset DSL (ftm #272)
+    datasets:         list[str] | None = None
     exclude_datasets: list[str] | None = None
     exclude_schemata: list[str] | None = None
-    topics:           list[str] | None = None            # supports aliases "risk", "all"
-    changed_since:    str | datetime | None = None       # ISO 8601 or datetime
+    topics:           list[Topic] | None = None
+    changed_since:    str | datetime | None = None
 
 
 class MatchFilters(_CommonFilters):
     """Filters for client.match() / match_many() / match_iter()."""
     exclude_entities: list[str] | None = None
-    # NB: server caps at 50 today (v1). The SDK validates client-side to give a
-    # faster error; revisit on /v2/match cut-over (limit may be relaxed).
 
 
 class SearchFilters(_CommonFilters):
     """Filters for client.search()."""
     countries: list[str] | None = None                   # ISO country codes
-    schema_:   str | None = Field(default=None, alias="schema")
+    schema_:   Schema | None = Field(default=None, alias="schema")
     filter_:   list[str] | None = Field(default=None, alias="filter")
     # `filter` and `schema` are Python-builtin / Pydantic-sensitive names;
     # populate_by_name=True means callers can still pass schema=/filter= as kwargs.
 ```
 
-**Self-validation** (per v2 issue #1100): construction raises `ValidationError` when the same value appears in `datasets` and `exclude_datasets`, in `schema` and `exclude_schemata`, or — for `MatchFilters` — in any include set and `exclude_entities`. Topic aliases (`"risk"`, `"all"`) are resolved during construction against the bundled `model.target_topics` / `model.enrich_topics`.
+`extra="forbid"` on both filter types makes cross-endpoint typos fail at construction: passing `countries=` to `match()` raises because `MatchFilters` doesn't have that field, and vice versa. The server validates content (contradictory include/exclude, etc.) — we don't mirror that client-side.
 
-**Kwargs flow:** every endpoint method accepts both `filters=` (the typed object) and **kwargs that name the filter's fields directly. Kwargs override fields on a passed `filters=` object. `match()` only accepts `MatchFilters` kwargs; `search()` only accepts `SearchFilters` kwargs — passing a search-only field to `match()` is a `ValidationError` at construction time.
+**Kwargs flow:** every endpoint method accepts both `filters=` (the typed object) and **kwargs that name the filter's fields directly. Kwargs override fields on a passed `filters=` object.
 
 `search()` signature:
 
@@ -436,7 +410,7 @@ Public type alias for entity inputs (used in the signatures below):
 
 ```python
 # in yente_client.entities
-EntityInput: TypeAlias = _EntityBase            # covers Person, Company, ..., and generic Entity
+EntityInput: TypeAlias = _EntityBase            # any per-schema class: Person, Company, Vessel, ...
 ```
 
 Three public methods, sharing one set of match-side kwargs (`filters`, `threshold`, `algorithm`, `weights`, `config`, `limit`):
@@ -519,7 +493,6 @@ The call layer in `_http.py` translates the v2-shaped public API to the current 
 | `filters.changed_since` (str or datetime) | query param `changed_since` (ISO 8601 str) |
 | `MatchResponse(query, results, total, limit)` | unwrapped from `raw["responses"]["q"]` plus top-level `limit` |
 | Strict 400 on unknown property name | enforced client-side via `extra="forbid"` (names only — values pass through) |
-| Topic alias `"risk"` | resolved to `model.target_topics` client-side |
 
 The unwrap is the one structural asymmetry: v1 wraps the result in `responses["q"]`; v2 returns it flat. The call layer unwraps unconditionally so the public response shape is stable.
 
@@ -562,7 +535,7 @@ Notes:
 
 - `--datasets` (plural) is used by both `search` and `match`; the CLI translates the same way the SDK does (first → URL path param, rest → repeated `include_dataset` query params). See §4.8.
 - `--schema` is overloaded by context: on `yente search` it filters results by entity type; on `yente match` it specifies the type of entity being constructed from the other flags. Acceptable because each command has only one natural meaning for it.
-- `--from-file path.json` (for `yente match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the same wire-format dict the generic `Entity` consumes. Flag-derived properties merge into / override the file's properties.
+- `--from-file path.json` (for `yente match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the wire-format match query. The CLI looks up the schema name in the bundled model, constructs the matching per-schema class, and feeds it to `match()`. Flag-derived properties merge into / override the file's properties.
 - CLI flag names follow the v2 conventions (`--datasets`, `--exclude-entities`, `--exclude-schemata`). The translation to v1 is identical to the SDK's.
 
 ### 5.2 Config precedence
@@ -653,12 +626,12 @@ Notes:
 
 ## 9. Milestones
 
-1. **Codegen pipeline + entity classes + literal types** — `scripts/regen_model.py`, Jinja templates, committed `model/model.json`, generated `python/src/yente_client/entities/_generated.py`, `schemas/_literals.py`, and TS counterparts under `typescript/src/`. CI `--check`. No HTTP client yet. End: `from yente_client.entities import Person` is importable; `mypy --strict` passes on the generated module; `regen --check` is idempotent.
+1. **Python codegen pipeline + entity classes + literal types** — `scripts/regen_model.py`, Python Jinja templates, committed `model/model.json`, generated `python/src/yente_client/entities/_generated.py` and `schemas/_literals.py`. CI `--check`. No HTTP client yet. End: `from yente_client.entities import Person` is importable; `mypy --strict` passes on the generated module; `regen --check` is idempotent. See the dedicated M1 plan in `plans/2026-05-29-m1-python-codegen.md` for the breakdown.
 2. **Python sync Client + response models + errors + tests** — covers `match` (v2-shaped surface, v1 wire), `search`, `fetch`, `adjacent`, `catalog`, `algorithms`, `healthz`, `readyz`. Builds on M1's generated entities and bundled model. No async, no CLI. End: `yente-client` installable from source; tests pass against fixtures.
 3. **AsyncClient** — parity with `Client`, reusing the request-builder layer.
 4. **`match_many` / `match_iter`** — client-side fan-out, threaded + async, with bounded concurrency and `on_error` policy. SDK-level only at this stage.
 5. **CLI v1** — `search`, `match`, `fetch`, `catalog`, `algorithms`. JSON / JSONL / table formatters. Config precedence + env var handling.
-6. **TypeScript SDK v1** — `Client` + models + errors + entities. Native fetch. zod-based response validation. Uses the TS artefacts already emitted by M1's regen pipeline.
+6. **TypeScript SDK v1** — `Client` + models + errors + entities. Native fetch. zod-based response validation. Extends the regen pipeline with TS Jinja templates so both languages stay model-locked.
 7. **First publish** — PyPI + npm 0.1.0, README quickstarts, GitHub Actions release on tag.
 8. **`yente screen` CLI** — threaded CSV screening, resumable, on top of `match_iter`.
 9. **Coverage gaps** — `/reconcile/*`, `/statements`, `/updatez`. Added as separate methods; no API redesign needed.
@@ -668,10 +641,8 @@ Stop and check in at the end of each milestone. Especially before publishing (st
 
 ## 10. Open questions to revisit
 
-- **Topic aliases (`"risk"`, `"all"`)**: implement client-side now (resolve to `model.target_topics` / `model.target_topics ∪ enrich_topics`) or wait for the server to canonicalise? Client-side gets the ergonomics today; server-side avoids drift if the alias semantics change. Lean: client-side, documented as a convenience that may move server-side later.
 - **`MatchFilters`/`SearchFilters` object vs kwargs as canonical**: both are supported; the docs need to pick one as primary in examples. Lean: kwargs (concise; matches the §4.1 examples). Filter objects are for reusable configs and for callers that build them programmatically.
 - **`/v2/match` self-hosted yente compatibility**: when v2 ships, do we keep the v1 call layer available for users running older yente builds, or just bump SDK major and drop v1? Lean: minor-version coexistence (the call layer probes `/v2/match` once per client and falls back to v1).
 - **`/statements`**: shape and pagination semantics weren't fully surveyed. Worth a short read of `yente/routers/` before milestone 9.
 - **Browser bundle for TS**: ship a separate browser-targeted bundle, or punt to Vite/Webpack from the ESM source? Lean: punt unless the website team wants something specific.
 - **Model snapshot drift policy**: when CI's `regen --check` fails because upstream `model.json` moved, do we auto-PR the diff (bot commit) or surface it for human review? Lean: human review — a property rename or removal can break user code and should be in release notes.
-- **`exclude_entities` size cap**: server enforces 50 today; we mirror this client-side in `MatchFilters`. Revisit on `/v2/match` cut-over — v2 spec doesn't promise the limit and we may want to relax or remove the client-side check then.
