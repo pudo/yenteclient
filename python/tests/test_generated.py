@@ -128,6 +128,52 @@ def test_gender_literal() -> None:
     assert set(args) == {"female", "male", "other"}
 
 
+def test_deprecated_field_present_and_usable() -> None:
+    """Deprecated fields are still emitted on the input class — they're real
+    fields, just flagged. We had a regression where a template whitespace bug
+    pulled the DEPRECATED comment onto the same line as the field, hiding the
+    field inside a Python comment. This test guards against that."""
+    # Person.secondName is deprecated own-property.
+    assert "secondName" in Person.model_fields
+    p = Person(secondName="Vyacheslavovich")
+    assert p.secondName == ["Vyacheslavovich"]
+    assert p.to_payload()["properties"]["secondName"] == ["Vyacheslavovich"]
+
+
+def test_deprecated_inherited_field_present_and_usable() -> None:
+    """Same regression check but on an inherited deprecated property:
+    Person.parent comes from LegalEntity and is deprecated."""
+    assert "parent" in Person.model_fields
+    p = Person(parent="LegalEntityID-123")
+    assert p.parent == ["LegalEntityID-123"]
+
+
+def test_generated_source_has_deprecated_comment() -> None:
+    """The DEPRECATED comment should be on its own line above the field —
+    not merged into the field declaration."""
+    from pathlib import Path
+
+    tests_dir = Path(__file__).resolve().parent
+    source = tests_dir.parent / "src" / "yente_client" / "entities" / "_generated.py"
+    text = source.read_text()
+    # Find the secondName field and look at the preceding line.
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if "secondName: list[str] = Field(" in line:
+            # The preceding non-empty line should be the DEPRECATED comment,
+            # alone on its line (not concatenated with the field).
+            prev = lines[i - 1].strip()
+            assert prev.startswith("# DEPRECATED"), (
+                f"expected DEPRECATED comment immediately above secondName, got: {prev!r}"
+            )
+            assert "secondName" not in prev, (
+                f"DEPRECATED comment must be on its own line; got: {prev!r}"
+            )
+            break
+    else:
+        raise AssertionError("secondName field not found in generated source")
+
+
 def test_stub_properties_excluded() -> None:
     """Reverse-side ("stub") entity properties are noise on a query payload;
     we exclude them from the generated input class so users only see fields
