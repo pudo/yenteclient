@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package + dev dependencies
+        run: pip install -e python/.[dev]
+
+      - name: ruff check
+        working-directory: python
+        run: ruff check .
+
+      - name: ruff format --check
+        working-directory: python
+        run: ruff format --check .
+
+      - name: mypy --strict
+        working-directory: python
+        run: mypy
+
+      - name: pytest
+        working-directory: python
+        run: pytest
+
+      - name: regen_model.py --check (drift detector)
+        run: python scripts/regen_model.py --check --skip-fetch

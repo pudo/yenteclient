@@ -26,6 +26,7 @@ import argparse
 import difflib
 import json
 import keyword
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -155,18 +156,27 @@ def render_artefacts(model_json: dict[str, Any]) -> dict[Path, str]:
     return renderings
 
 
+def _find_ruff() -> str:
+    """Locate the ``ruff`` binary: prefer the project venv (local dev), fall
+    back to whatever is on ``PATH`` (CI, where there's no per-project venv)."""
+    if RUFF_BIN.exists():
+        return str(RUFF_BIN)
+    found = shutil.which("ruff")
+    if found is None:
+        raise RuntimeError(
+            "ruff not found. Install with `pip install ruff` or run `make setup`."
+        )
+    return found
+
+
 def ruff_format(text: str, path: Path) -> str:
     """Run ``ruff format`` on `text` with the per-file settings for ``path``.
 
     Uses ``--stdin-filename`` so ruff reads the project's ``pyproject.toml``
     and applies the right line-length and target-version for the file.
     """
-    if not RUFF_BIN.exists():
-        raise RuntimeError(
-            f"ruff not found at {RUFF_BIN}. Run `make setup` to create the venv."
-        )
     result = subprocess.run(
-        [str(RUFF_BIN), "format", "--stdin-filename", str(path), "-"],
+        [_find_ruff(), "format", "--stdin-filename", str(path), "-"],
         input=text,
         text=True,
         capture_output=True,

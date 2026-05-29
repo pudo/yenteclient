@@ -9,19 +9,22 @@ Verifies:
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "regen_model.py"
-PYTHON = REPO_ROOT / "python" / ".venv" / "bin" / "python"
 GENERATED_FILE = REPO_ROOT / "python" / "src" / "yente_client" / "entities" / "_generated.py"
 
 
 def _run_check() -> subprocess.CompletedProcess[str]:
+    """Invoke regen_model.py --check --skip-fetch with the current interpreter.
+
+    Using ``sys.executable`` rather than a hardcoded venv binary keeps this
+    test portable across local dev (venv) and CI (system Python).
+    """
     return subprocess.run(
-        [str(PYTHON), str(SCRIPT), "--check", "--skip-fetch"],
+        [sys.executable, str(SCRIPT), "--check", "--skip-fetch"],
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
@@ -47,10 +50,3 @@ def test_regen_check_detects_modified_generated_file(tmp_path: Path) -> None:
         assert "differs" in result.stderr or "differs" in result.stdout
     finally:
         shutil.copy(backup, GENERATED_FILE)
-
-
-@pytest.mark.skipif(not PYTHON.exists(), reason="venv python not present")
-def test_python_venv_exists() -> None:
-    # Defensive: if the test runner uses a different interpreter than .venv,
-    # the subprocess approach above relies on this binary being present.
-    assert PYTHON.exists()
