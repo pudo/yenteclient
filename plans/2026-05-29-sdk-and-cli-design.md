@@ -1,5 +1,5 @@
 ---
-description: Initial design for a Python + TypeScript client SDK and a Python CLI for the yente / hosted OpenSanctions API.
+description: Design for a Python + TypeScript client SDK and a Python CLI for the yente / hosted OpenSanctions API. Public surface mirrors the planned /v2/match shape while the call layer targets the current v1 wire.
 date: 2026-05-29
 tags: [yente, sdk, cli, python, typescript, design]
 ---
@@ -11,10 +11,14 @@ tags: [yente, sdk, cli, python, typescript, design]
 Two client libraries and one CLI, in a single repo (`/home/pudo/code/yenteclient`):
 
 - **`python/`** — `yente-client` on PyPI. Sync + async, both backed by `httpx`. Powers the CLI.
-- **`typescript/`** — `@opensanctions/yente-client` on npm. ESM, native `fetch`, types via `@alephdata/followthemoney`.
+- **`typescript/`** — `@opensanctions/yente-client` on npm. ESM, native `fetch`.
 - **`python/yente_client/cli/`** — `yente` CLI, built on Typer, driving the Python SDK.
 
 Both SDKs target **the hosted API and self-hosted yente from one client surface**: `base_url` defaults to `https://api.opensanctions.org`; passing an `api_key` adds `Authorization: ApiKey <key>`; omitting it works against self-hosted yente.
+
+Both SDKs bake in the same FtM model snapshot (see §4.2), so the Python and TypeScript types cannot drift from each other or from the server.
+
+**Guiding rule — design for `/v2/match` today, call `/v1` underneath.** The yente team has speccéd a cleaner v2 endpoint (issue #1100); the public SDK API mirrors that shape so user code is forward-compatible. The HTTP layer translates to the current `POST /match/{dataset}` wire on the way out. When v2 ships, only the translation layer changes.
 
 **Non-goals (v1):** OpenRefine reconciliation helpers, `/statements` bulk export, `/updatez` admin flows. They can be added behind the same `Client` later; designing them is out of scope here.
 
@@ -22,11 +26,13 @@ Both SDKs target **the hosted API and self-hosted yente from one client surface*
 
 From the live OpenAPI (`https://api.opensanctions.org/openapi.json`, yente 5.4.0):
 
-| Endpoint | SDK method | CLI |
+| Endpoint (v1 wire) | SDK method | CLI |
 | --- | --- | --- |
-| `POST /match/{dataset}` | `client.match(queries, dataset="default", **opts)` | `yente match` |
-| `GET /search/{dataset}` | `client.search(q, dataset="default", **opts)` | `yente search` |
-| `GET /entities/{id}` | `client.fetch(id, nested=True)` | `yente fetch` |
+| `POST /match/{dataset}` (one query at a time, see §4.7) | `client.match(entity, **filters)` → `MatchResponse` | `yente match` |
+| same, looped client-side | `client.match_many(entities, workers=N)` → `list[MatchResponse]` | (consumed by `yente screen`) |
+| same, streaming | `client.match_iter(entity_iter, workers=N)` → `Iterator[(key, MatchResponse)]` | `yente screen` |
+| `GET /search/{dataset}` | `client.search(q, datasets=["default"], **opts)` → `SearchResponse` | `yente search` |
+| `GET /entities/{id}` | `client.fetch(id, nested=True)` → `Entity` | `yente fetch` |
 | `GET /entities/{id}/adjacent[/{prop}]` | `client.adjacent(id, prop=None, **paging)` | `yente fetch --adjacent` |
 | `GET /catalog` | `client.catalog()` | `yente catalog` |
 | `GET /algorithms` | `client.algorithms()` | `yente algorithms` |
@@ -39,100 +45,250 @@ Deferred to a later iteration: `/reconcile/*`, `/statements`, `/updatez`.
 ```
 yenteclient/
 ├── README.md                        # what this is, links to python/ and typescript/
+├── Makefile                         # regen-model, lint, test
 ├── plans/                           # design docs (this file lives here)
+├── model/
+│   └── model.json                   # canonical FtM model snapshot, committed
+├── scripts/
+│   ├── regen_model.py               # fetches model.json, fans out to each language
+│   └── templates/
+│       ├── python_entities.py.j2    # Jinja template for python entity classes
+│       ├── python_literals.py.j2    # Schema / PropertyType / Topic Literal types
+│       ├── ts_entities.ts.j2        # TS interfaces + builders
+│       └── ts_literals.ts.j2        # Schema / Topic string-union types
 ├── python/
 │   ├── pyproject.toml               # PyPI: yente-client
 │   ├── src/yente_client/
-│   │   ├── __init__.py              # exports Client, AsyncClient, models, exceptions
+│   │   ├── __init__.py              # exports Client, AsyncClient, MatchFilters, SearchFilters, exceptions
 │   │   ├── client.py                # sync Client (httpx.Client)
 │   │   ├── async_client.py          # AsyncClient (httpx.AsyncClient)
-│   │   ├── _http.py                 # shared request building, error mapping
-│   │   ├── models.py                # pydantic response models
+│   │   ├── _http.py                 # request building, retry, error mapping, v1<->v2 translation
+│   │   ├── models.py                # pydantic response models (Entity, ScoredEntity, MatchResponse, ...)
+│   │   ├── filters.py               # _CommonFilters, MatchFilters, SearchFilters
 │   │   ├── exceptions.py            # YenteError hierarchy
+│   │   ├── entities/
+│   │   │   ├── __init__.py          # re-exports every schema class
+│   │   │   ├── _base.py             # _EntityBase (BaseModel), generic Entity escape hatch, _ensure_list
+│   │   │   └── _generated.py        # 69 per-schema BaseModels; REGENERATED, do not edit by hand
 │   │   ├── schemas/
-│   │   │   ├── __init__.py          # loads schemas.json
-│   │   │   ├── schemas.json         # generated, committed
-│   │   │   └── _literals.py         # generated Literal types for autocomplete
+│   │   │   ├── __init__.py          # lazy-loads model.json; exposes schemata, types, target_topics
+│   │   │   ├── model.json           # copied from /model/model.json by regen
+│   │   │   └── _literals.py         # generated Schema / PropertyType / Topic Literal types
 │   │   ├── cli/
 │   │   │   ├── __init__.py
 │   │   │   ├── main.py              # `yente` entrypoint (Typer app)
 │   │   │   ├── commands.py          # search, match, fetch, catalog, algorithms
 │   │   │   └── output.py            # json / table / jsonl formatters
 │   │   └── _version.py
-│   ├── scripts/regen_schemas.py     # pulls from followthemoney, writes schemas.json + _literals.py
 │   └── tests/
 │       ├── conftest.py              # respx-based fixtures
 │       ├── test_client.py
 │       ├── test_models.py
+│       ├── test_entities.py
 │       └── test_cli.py
 ├── typescript/
 │   ├── package.json                 # npm: @opensanctions/yente-client
 │   ├── tsconfig.json
 │   ├── src/
-│   │   ├── index.ts                 # Client, AsyncClient (or just Client; see §6)
+│   │   ├── index.ts                 # Client + exports
 │   │   ├── http.ts                  # request/response plumbing
 │   │   ├── models.ts                # zod schemas → inferred TS types
-│   │   └── errors.ts
+│   │   ├── errors.ts
+│   │   ├── filters.ts               # Filters type
+│   │   ├── entities/
+│   │   │   ├── index.ts             # re-exports every schema interface + builder
+│   │   │   └── _generated.ts        # per-schema interfaces + builders; REGENERATED
+│   │   ├── model.json               # copied from /model/model.json by regen
+│   │   └── model.types.ts           # generated Schema / Topic string-union types
 │   └── test/
-└── .github/workflows/ci.yml         # matrix: python {3.10,3.11,3.12,3.13} + node {20,22}
+├── testdata/                        # fixture JSON shared across language test suites
+└── .github/workflows/ci.yml         # python {3.10–3.13} + node {20, 22}; runs `regen --check`
 ```
 
 ## 4. Python SDK design
 
 ### 4.1 Client surface
 
+The public surface mirrors the planned v2 shape: one entity per `match` call, filters grouped under one logical roof, flat response with `query` + `results`.
+
 ```python
-from yente_client import Client, AsyncClient
-from yente_client.models import MatchResponse, SearchResponse, Entity
+from yente_client import Client, AsyncClient, MatchFilters, SearchFilters
+from yente_client.entities import Person, Company
 
 with Client(api_key="...") as c:
-    out: MatchResponse = c.match(
-        queries={"alpha": {"schema": "Person",
-                            "properties": {"firstName": ["Aleksandr"],
-                                          "lastName": ["Zacharov"]}}},
-        dataset="default",
+    # Single — the common interactive case
+    hits = c.match(
+        Person(firstName="Aleksandr", lastName="Zacharov", birthDate="1965"),
+        datasets=["sanctions"],
+        topics=["sanction", "role.pep"],
         threshold=0.7,
         algorithm="best",
-        topics=["sanction"],
+        changed_since="2022-02-24",
+        exclude_entities=["Q7747"],
+        exclude_schemata=["Address"],
     )
-    for hit in out.responses["alpha"].results:
-        print(hit.id, hit.score, hit.caption)
+    # hits: MatchResponse(query=..., results=[ScoredEntity, ...], total=..., limit=...)
+    if hits.top is not None:                     # None when results is empty
+        print(hits.top.score, hits.top.caption)
+    for h in hits.matches:                       # score >= threshold
+        print(h.id, h.properties.get("topics", []))
 
-    e: Entity = c.fetch("NK-aU5ybkbRFJucf8YMwsJvDw")
-    for s in e.properties.get("sanctions", []):
-        print(s.properties["authority"])
+    # Explicit filter object — useful when the same config is reused
+    f = MatchFilters(datasets=["sanctions"], topics=["sanction"])
+    hits = c.match(Person(name="Acme Holdings"), filters=f, threshold=0.7)
+
+    # Many — pure client-side fan-out; one HTTP call per entity
+    results: list[MatchResponse] = c.match_many(
+        [Person(...), Person(...), Company(...)],
+        datasets=["sanctions"],
+        workers=4,
+    )
+
+    # Stream — for arbitrary-size inputs; yields as results return
+    def queries():
+        for row in csv_reader:
+            yield row["customer_id"], Person(firstName=row["fn"], lastName=row["ln"])
+
+    for key, hits in c.match_iter(queries(), datasets=["sanctions"], workers=8):
+        write_row(key, hits)
+
+    # Search uses the same dataset filter shape as match
+    e = c.fetch("NK-aU5ybkbRFJucf8YMwsJvDw")        # follows 308 transparently
+    res = c.search("acme", datasets=["default"], schema="Company", topics=["sanction"])
 
 async with AsyncClient(api_key="...") as ac:
-    out = await ac.match(...)
+    hits = await ac.match(Person(firstName="X", lastName="Y"), datasets=["sanctions"])
+    async for key, hits in ac.match_iter(queries(), workers=16):
+        ...
 ```
 
-Symmetry rule: `Client` and `AsyncClient` expose the **same method names and signatures**; the only difference is `await`. Achieved by routing both through a single `_RequestBuilder` that produces `httpx.Request` + a parsing callback; each client wraps its own transport.
+**Sync ↔ async pairing:** `Client` and `AsyncClient` expose the same method *names* and kwarg sets. The differences are structural where the language requires them: `match` / `match_many` become coroutines (caller writes `await`), `match_iter` returns an `AsyncIterator` (caller writes `async for`). Both halves share one request-builder layer that produces `httpx.Request` + a parsing callback; each client wraps its own transport.
 
-### 4.2 Type system — lightweight FtM
+**Match-call semantics:**
 
-We **do not** depend on `followthemoney` at runtime. We ship a generated artefact under `yente_client/schemas/`:
+- **Filter kwargs and `filters=` are merged** — kwargs override fields on a passed-in `MatchFilters` (or `SearchFilters` for `search`). Conflicting include/exclude (same value in `datasets` and `exclude_datasets`, etc.) raises `ValidationError` client-side before the HTTP call. Passing a search-only kwarg to `match` (or vice versa) is also a `ValidationError`.
+- **`datasets` is `str | list[str] | dict`** — `"sanctions"` and `["sanctions"]` are equivalent. A `dict` is accepted for forward-compatibility with the planned dataset DSL (ftm #272); today it's serialized verbatim and the server may reject it, that's fine.
+- **`topics` aliases** — `"risk"` (any target topic) and `"all"` (target + enrich) resolve client-side to the full list from the bundled model. See §10 for the rationale.
+- **Structural pre-validation (names only)** — constructing a `Person` with an unknown kwarg raises immediately (`extra="forbid"` on every entity class). Same goes for an unknown `schema=` on the generic `Entity`. This matches v2's planned "400 on invalid properties" behaviour without a round-trip.
+- **No value-level cleaning client-side** — we pass property values straight to the wire (after `str → list[str]` normalisation, which is type adaptation, not validation). Date parsing, name cleaning, country canonicalisation, identifier checksums, etc. are deliberately not attempted: doing them properly requires `normality` + `rigour` + the rest of the FtM stack, and an inexact reimplementation would be a footgun ("the SDK said it was valid, the server returned 400"). The server is the source of truth on values; the SDK ships errors back unchanged.
 
-- **`schemas.json`** — flat map: `{schema_name: {"parent": str|None, "extends": [str], "properties": {prop_name: {"type": str, "schema_range": str|None}}}}`. Generated from the local `followthemoney` checkout via `scripts/regen_schemas.py`. ~50 KB; committed to the repo.
-- **`_literals.py`** — generated `Schema = Literal["Person", "Company", ...]`. Used for IDE autocomplete and `mypy` checks. Regenerated alongside `schemas.json`.
+### 4.2 Type system — bundled FtM model + per-schema codegen
 
-At runtime we load `schemas.json` lazily on first use. The schema module exposes:
+We **do not** depend on `followthemoney` at runtime. The single authoritative source baked into both SDKs is the published OpenSanctions model snapshot:
+
+> **`https://data.opensanctions.org/meta/model.json`**
+
+This is the same model the production stack and `yente` are pinned to, so client types cannot disagree with the server about what `Person.birthDate` is. It contains:
+
+- `model.schemata` — 69 schemas, each with `schemata` (full ancestor chain, already flattened), `extends`, `featured`, `required`, `caption`, `temporalExtent`, `matchable`, and per-property `{type, label, description, maxLength, range, deprecated}`.
+- `model.types` — 20 property types (`name`, `address`, `date`, `country`, `topic`, `gender`, …) with `matchable`, `group`, and enum `values` where applicable.
+- `target_topics` and `enrich_topics` — flat lists of topics that flag an entity as a screening target / enrichment candidate.
+
+A single canonical copy lives at **`model/model.json`** at the repo root, committed and refreshed via `make regen-model`.
+
+#### 4.2.1 Per-schema pydantic classes (the headline ergonomic)
+
+Dynamic generation via `pydantic.create_model` doesn't give static analysers anything to see, so IDE autocomplete and `mypy` / `pyright` get nothing. To get **perfect Python type annotations** — IDE field completion, refactoring tools, deprecation warnings on deprecated properties — we commit **generated `.py` files**, one BaseModel per schema, with properties flattened from the `schemata` ancestor chain.
 
 ```python
-from yente_client.schemas import schemas, is_a, property_type
+# python/src/yente_client/entities/_generated.py — REGENERATED, do not edit
+from typing import ClassVar, Literal
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from ._base import _ensure_list, PropertyValue   # PropertyValue = str | list[str]
 
-schemas["Person"].properties["birthDate"].type  # "date"
-is_a("LegalEntity", "Thing")                    # True
+
+class _EntityBase(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    id: str | None = None
+    schema_: ClassVar[str]                       # set on subclasses
+
+    def to_payload(self) -> dict: ...            # serialises for /match
+
+
+class Person(_EntityBase):
+    """A natural person, as opposed to a corporation of some type."""
+    schema_: ClassVar[Literal["Person"]] = "Person"
+
+    name:        list[str] = Field(default_factory=list)
+    firstName:   list[str] = Field(default_factory=list)
+    lastName:    list[str] = Field(default_factory=list)
+    middleName:  list[str] = Field(default_factory=list)
+    birthDate:   list[str] = Field(default_factory=list)
+    nationality: list[str] = Field(default_factory=list)
+    country:     list[str] = Field(default_factory=list)   # inherited from LegalEntity
+    topics:      list[str] = Field(default_factory=list)   # inherited from Thing
+    # ... all own + inherited properties, flat ...
+
+    _coerce = field_validator("*", mode="before")(_ensure_list)
+    _warn_deprecated = model_validator(mode="after")(_warn_if_deprecated_set)
+    _DEPRECATED: ClassVar[frozenset[str]] = frozenset({"secondName"})
+
+
+class Company(_EntityBase):
+    schema_: ClassVar[Literal["Company"]] = "Company"
+    name:              list[str] = Field(default_factory=list)
+    jurisdiction:      list[str] = Field(default_factory=list)
+    incorporationDate: list[str] = Field(default_factory=list)
+    ...
 ```
 
-The point is **type hinting + light validation**, not full FtM parity. We don't transliterate, normalize, or validate property values — the server does that.
+Properties of note:
 
-**Input ergonomics:** `match()` accepts either a plain dict (`{"schema": "Person", "properties": {...}}`) or a `MatchInput` TypedDict. Property values can be `str | list[str]` and we coerce to lists internally.
+- **Flat property set per class** — own + inherited via the `schemata` ancestor list. No MRO walk at runtime.
+- **camelCase preserved** — matches wire format, matches docs, matches the bundled model. `Person(birth_date=...)` would not autocomplete and would raise `extra="forbid"`.
+- **`Literal` discriminator on `schema_`** — type checkers can refine `_EntityBase` → `Person` after `isinstance` checks.
+- **`list[str]` everywhere** — one wildcard `field_validator` normalises `str → [str]` so users can pass either.
+- **`extra="forbid"`** — typos fail at construction, matching v2's planned 400-on-unknown-property behaviour.
+- **Name-only validation, never values** — `extra="forbid"` rejects unknown kwargs (typos, properties not on the schema). Values are accepted as-is and forwarded. Proper value cleaning needs `normality` + `rigour` and is the server's job; a half-reimplementation would diverge over time and turn the SDK into an unreliable gate.
+- **Deprecation surfacing** — two channels:
+  1. **Codegen-time:** properties marked `deprecated: true` in the model get a `# DEPRECATED: <description>` line above the field in the generated source.
+  2. **Runtime:** a per-class `_DEPRECATED` ClassVar lists the property names; a `model_validator(mode="after")` emits `DeprecationWarning` for any deprecated property that received a non-empty value. (The wildcard `_coerce` validator stays single-purpose — `str → list[str]` only.)
 
-**Schema regeneration:** `make regen-schemas` runs `scripts/regen_schemas.py` using the user's local `followthemoney` checkout (`/home/pudo/code/followthemoney`) — invoked via `/home/pudo/.venv/wrangle/bin/python` per CLAUDE.md. The script writes `schemas.json` and `_literals.py`. Both are committed; CI verifies they're up to date with whatever followthemoney version is pinned.
+#### 4.2.2 Generic `Entity` escape hatch
+
+For dynamic input (schema chosen at runtime, properties coming from a config), keep a generic class. It is structurally different from the per-schema classes — properties go into a single `properties: dict[str, list[str]]` field instead of being typed kwargs — but it inherits from the same `_EntityBase` so `match()` accepts it uniformly via the `EntityInput` alias.
+
+```python
+from yente_client import Entity
+
+e = Entity(schema="Vessel", properties={"name": ["MV Acme"], "imoNumber": ["1234567"]})
+client.match(e, datasets=["sanctions"])
+```
+
+Construction validates the `schema=` name against `model.schemata` and every property name against `model.schemata[<schema>].properties`; unknown names raise `ValidationError`. Use `Entity` only when per-schema typing isn't possible (config-driven, fully dynamic input). The per-schema class is always preferred and gives IDE autocomplete.
+
+**Naming note:** the input `Entity` takes the schema as a constructor kwarg `schema=` (with `populate_by_name=True`, `schema_=` also works). The *response* `Entity` in §4.3 is a separate class with a `schema_: str = Field(alias="schema")` field — the wire JSON uses `"schema"` in both directions; the Python identifier differs only because the response model lifts schema into a regular field while the input class uses a `ClassVar` discriminator on the per-schema subclasses.
+
+#### 4.2.3 Runtime introspection
+
+```python
+from yente_client.schemas import model, is_a
+
+model.schemata["Person"].properties["birthDate"].type   # "date"
+is_a("LegalEntity", "Thing")                            # True
+"sanction" in model.target_topics                       # True
+```
+
+The schemas module loads `model.json` lazily on first access. It's small (~150 KB) and cheap to keep parsed.
+
+#### 4.2.4 Codegen pipeline
+
+`scripts/regen_model.py` (plain stdlib `urllib` + `jinja2` for templating + `ruff format` as a postprocess; no FtM dep, no `wrangle` env coupling):
+
+1. Fetch `https://data.opensanctions.org/meta/model.json`, write `model/model.json`.
+2. Copy to `python/src/yente_client/schemas/model.json` and `typescript/src/model.json`.
+3. Render `python/src/yente_client/entities/_generated.py` from `python_entities.py.j2`: one class per schema, properties flattened across `schemata`, deprecation markers preserved.
+4. Render `python/src/yente_client/schemas/_literals.py` from `python_literals.py.j2`: `Schema = Literal["Person", ...]`, `PropertyType = Literal[...]`, `TargetTopic = Literal[...]`, `EnrichTopic = Literal[...]`.
+5. Render the equivalent TS artefacts from `ts_entities.ts.j2` and `ts_literals.ts.j2`.
+6. Run `ruff format` on the Python output and `prettier` on the TS output.
+
+CI runs `python scripts/regen_model.py --check` and fails if any committed artefact differs from what the live model would generate. Upstream drift then surfaces as a normal PR review — release notes can call out additions, deprecations, removals.
+
+**Why hand-rolled with Jinja, not `datamodel-code-generator`:** `model.json` is the FtM meta-model, not JSON Schema. Going through `datamodel-code-generator` would require a `model.json → JSON Schema` transformer first — roughly the same volume of code as the direct generator, with the loss of fine-grained control over the output (Literal placement, deprecation markers, classvar use). `openapi-python-client` would generate a full client and fight our hand-crafted v2-shaped surface. Hand-rolled wins at this scale because the inputs are well-defined and the outputs are opinionated.
 
 ### 4.3 Response models
 
-Pydantic v2 models, lifted directly from `yente/data/common.py`:
+Pydantic v2 models, mirroring the v2-flat response shape (translated from v1's `responses[key]` wrapper in the call layer):
 
 ```python
 class Entity(BaseModel):
@@ -147,20 +303,32 @@ class Entity(BaseModel):
     last_seen: datetime | None = None
     last_change: datetime | None = None
 
+
 class ScoredEntity(Entity):
     score: float
     match: bool
     explanations: dict[str, FeatureResult] = {}
 
-class MatchResults(BaseModel):
-    status: int
-    results: list[ScoredEntity]
-    total: TotalSpec
-    query: dict
+    def why(self) -> str:
+        """Human-readable, one-line-per-feature summary of explanations."""
+
 
 class MatchResponse(BaseModel):
-    responses: dict[str, MatchResults]
+    """v2-shaped flat response. The v1 `responses[key]` envelope is unwrapped in the call layer."""
+    query: dict
+    results: list[ScoredEntity]
+    total: TotalSpec
     limit: int
+
+    @property
+    def top(self) -> ScoredEntity | None: ...        # highest-scoring result, or None
+    @property
+    def matches(self) -> list[ScoredEntity]: ...     # filtered to match=True
+    @property
+    def targets(self) -> list[ScoredEntity]: ...     # filtered to target=True
+    def __iter__(self) -> Iterator[ScoredEntity]: ...
+    def __len__(self) -> int: ...
+
 
 class SearchResponse(BaseModel):
     results: list[Entity]
@@ -170,86 +338,232 @@ class SearchResponse(BaseModel):
     offset: int
 ```
 
-The recursive `Entity` (nested entities inside `properties`) is the only structural subtlety. Pydantic handles forward refs cleanly.
+The recursive `Entity` (nested entities inside `properties`) is the only structural subtlety. Pydantic v2 handles forward refs cleanly.
 
-### 4.4 Errors
+### 4.4 Filters
+
+`/match` and `/search` accept overlapping but non-identical filter sets. We split into two public types sharing a small base, so an irrelevant field can't silently no-op:
+
+```python
+class _CommonFilters(BaseModel):
+    """Shared by MatchFilters and SearchFilters; do not use directly."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    datasets:         list[str] | dict | None = None     # accepts future dataset DSL (ftm #272)
+    exclude_datasets: list[str] | None = None
+    exclude_schemata: list[str] | None = None
+    topics:           list[str] | None = None            # supports aliases "risk", "all"
+    changed_since:    str | datetime | None = None       # ISO 8601 or datetime
+
+
+class MatchFilters(_CommonFilters):
+    """Filters for client.match() / match_many() / match_iter()."""
+    exclude_entities: list[str] | None = None
+    # NB: server caps at 50 today (v1). The SDK validates client-side to give a
+    # faster error; revisit on /v2/match cut-over (limit may be relaxed).
+
+
+class SearchFilters(_CommonFilters):
+    """Filters for client.search()."""
+    countries: list[str] | None = None                   # ISO country codes
+    schema_:   str | None = Field(default=None, alias="schema")
+    filter_:   list[str] | None = Field(default=None, alias="filter")
+    # `filter` and `schema` are Python-builtin / Pydantic-sensitive names;
+    # populate_by_name=True means callers can still pass schema=/filter= as kwargs.
+```
+
+**Self-validation** (per v2 issue #1100): construction raises `ValidationError` when the same value appears in `datasets` and `exclude_datasets`, in `schema` and `exclude_schemata`, or — for `MatchFilters` — in any include set and `exclude_entities`. Topic aliases (`"risk"`, `"all"`) are resolved during construction against the bundled `model.target_topics` / `model.enrich_topics`.
+
+**Kwargs flow:** every endpoint method accepts both `filters=` (the typed object) and **kwargs that name the filter's fields directly. Kwargs override fields on a passed `filters=` object. `match()` only accepts `MatchFilters` kwargs; `search()` only accepts `SearchFilters` kwargs — passing a search-only field to `match()` is a `ValidationError` at construction time.
+
+`search()` signature:
+
+```python
+def search(
+    self,
+    q: str,
+    *,
+    filters: SearchFilters | None = None,
+    limit: int | None = None,                            # server default 10, max 500
+    offset: int = 0,                                     # max 9489
+    sort: list[str] | None = None,
+    fuzzy: bool = False,
+    simple: bool = False,
+    facets: list[str] | None = None,                     # defaults: countries, topics, datasets
+    **filter_kwargs,                                     # merged into SearchFilters
+) -> SearchResponse: ...
+```
+
+The `datasets` filter is translated to the v1 URL the same way as `match()` — first dataset → path param, rest → repeated `include_dataset` query params (see §4.8).
+
+### 4.5 Errors
 
 ```
 YenteError                  # base
-├── ConfigurationError      # missing api_key when hosted base_url is used (warn, not raise — see §4.5)
-├── TransportError          # network/timeout
+├── ConfigurationError      # bad client config (e.g. empty base_url)
+├── TransportError          # network / timeout
 ├── APIError                # any non-2xx with a JSON detail body
 │   ├── BadRequestError     # 400
 │   ├── AuthenticationError # 401, 403
 │   ├── NotFoundError       # 404
 │   ├── RateLimitError      # 429 (carries .retry_after if present)
 │   └── ServerError         # 5xx
+└── ValidationError         # client-side: unknown property/schema, contradictory filters,
+                            # search-only kwarg on match() or vice versa
 ```
 
-Every `APIError` carries `.status_code`, `.detail` (from the response body's `detail` field), and `.response` (raw `httpx.Response`).
+Every `APIError` carries `.status_code`, `.detail` (from the response body), and `.response` (raw `httpx.Response`). Client-side `ValidationError` is raised before any HTTP call.
 
-### 4.5 HTTP, redirects, retries, timeouts
+### 4.6 HTTP, redirects, retries, timeouts
 
 - **Transport:** `httpx.Client` / `AsyncClient` with `follow_redirects=True`. The `308` on `/entities/{referent}` → `/entities/{canonical}` is followed transparently.
 - **Timeout:** default `httpx.Timeout(30.0, connect=10.0)`; overridable via `Client(timeout=...)`.
-- **Retries:** `httpx`'s transport supports retries on connection errors only. For HTTP-level retries (429, 502, 503, 504), we use a small wrapper: exponential backoff (base 0.5s, factor 2, max 4 attempts, max delay 16s, plus full jitter). Honoring `Retry-After` when present on 429. Configurable via `Client(retry=RetryPolicy(...))`.
-- **Auth header:** when `api_key` is set, we attach `Authorization: ApiKey {key}` to every request. When missing and `base_url` points at `api.opensanctions.org`, we emit a `warnings.warn` once — not an exception (self-hosted setups don't need keys, and the user may be on an internal proxy).
-- **User-Agent:** `yente-client/{version} python/{py_version}` — useful for hosted-side telemetry.
+- **Retries:** HTTP-level retries on 429, 502, 503, 504 with exponential backoff (base 0.5s, factor 2, max 4 attempts, max delay 16s, full jitter). Honors `Retry-After` on 429. Configurable via `Client(retry=RetryPolicy(...))`. Connection-level retries are httpx's default.
+- **Auth header:** when `api_key` is set, attach `Authorization: ApiKey {key}` to every request. When missing and `base_url` points at `api.opensanctions.org`, emit `warnings.warn` once — not an exception (self-hosted setups don't need keys).
+- **User-Agent:** `yente-client/{version} python/{py_version}`.
+- **List query parameters:** httpx serialises `list[str]` as repeated keys natively (`include_dataset=a&include_dataset=b`); we always pass lists.
 
-### 4.6 List-valued query parameters
+### 4.7 One HTTP call per match — never wire-level batching
 
-Yente's `/search` and `/match` take repeated query params (`include_dataset=a&include_dataset=b`). `httpx` handles `list` values natively. We accept both `str` and `list[str]` in the SDK and normalize to lists.
+**Rule:** every `match()` call issues exactly one `POST /match/{dataset}` request with `queries={"q": <entity>}`. Wire-level batching is disabled by design.
 
-### 4.7 Bulk-screening helpers (v2, but designed now)
+Why:
+
+- The yente team has observed wire-level batching to be a performance anti-pattern (issue #1100): a single slow query in a batch holds up the whole response, and server-side parallelism saturates differently than client-side parallelism.
+- `/v2/match` will drop wire-level batching entirely. By restricting ourselves now, the migration is a no-op.
+
+Public type alias for entity inputs (used in the signatures below):
 
 ```python
+# in yente_client.entities
+EntityInput: TypeAlias = _EntityBase            # covers Person, Company, ..., and generic Entity
+```
+
+Three public methods, sharing one set of match-side kwargs (`filters`, `threshold`, `algorithm`, `weights`, `config`, `limit`):
+
+```python
+def match(
+    self,
+    entity: EntityInput,
+    *,
+    filters: MatchFilters | None = None,
+    threshold: float | None = None,             # server default 0.70
+    algorithm: str | None = None,               # server default "best"
+    weights: dict[str, float] | None = None,
+    config: dict | None = None,
+    limit: int | None = None,                   # results per query; server default 5, max 500
+    **filter_kwargs,                            # merged into MatchFilters
+) -> MatchResponse:
+    """One /match call. The dominant interactive case."""
+    ...
+
+def match_many(
+    self,
+    entities: Sequence[EntityInput],
+    *,
+    workers: int = 4,
+    filters: MatchFilters | None = None,
+    threshold: float | None = None,
+    algorithm: str | None = None,
+    weights: dict[str, float] | None = None,
+    config: dict | None = None,
+    limit: int | None = None,
+    on_error: Literal["raise", "collect"] = "raise",
+    **filter_kwargs,
+) -> list[MatchResponse]:
+    """Run /match for each entity in parallel; return results in input order."""
+    ...
+
 def match_iter(
     self,
-    queries: Iterable[tuple[str, MatchInput]],   # (key, entity) tuples
-    dataset: str = "default",
-    batch_size: int = 100,
+    entities: Iterable[tuple[str, EntityInput]],   # (key, entity) pairs
+    *,
     workers: int = 4,
-    **opts,
-) -> Iterator[tuple[str, MatchResults]]:
+    filters: MatchFilters | None = None,
+    threshold: float | None = None,
+    algorithm: str | None = None,
+    weights: dict[str, float] | None = None,
+    config: dict | None = None,
+    limit: int | None = None,
+    on_error: Literal["raise", "collect"] = "raise",
+    **filter_kwargs,
+) -> Iterator[tuple[str, MatchResponse]]:
+    """Stream /match over an iterable; yield (key, response) as each completes.
+    Order is completion order, not input order — the key disambiguates."""
     ...
 ```
 
-- Chunks input into batches of `MAX_BATCH=100`.
-- Submits batches across `workers` threads (sync) or via `asyncio.gather` (async).
-- Yields per-query results as they complete. Order matches input only if `workers=1`.
-- Each chunk failure raises with which keys were in flight; the iterator does not silently drop work.
+The async variants (`AsyncClient.match`, `.match_many`, `.match_iter`) have identical kwargs; `match` and `match_many` become coroutines, and `match_iter` returns an `AsyncIterator`.
 
-The threaded CSV CLI (`yente screen`) is a thin shell around this — same retry policy, same backpressure. Designing the kernel now keeps the CLI a wrapper rather than a re-implementation.
+Implementation:
+
+- **Sync:** `ThreadPoolExecutor(max_workers=workers)`. `match_iter` uses `as_completed`; `match_many` collects and reorders.
+- **Async:** an `asyncio.Semaphore(workers)` bounds concurrency. `match_iter` is an `async for`-friendly generator.
+- **Backpressure:** `match_iter` submits one new task per yielded result, so the in-flight set stays at `~workers` regardless of how big the input iterable is.
+- **Errors:** by default a failed item raises and cancels in-flight work; with `on_error="collect"` errors are returned in-band as `MatchError(key=..., exception=...)` so a large run can continue.
+- **Rate limits:** the same `RetryPolicy` applies per call; a 429 with `Retry-After` pauses *that* worker, others continue.
+
+The threaded CSV CLI (`yente screen`, §5.5) is a thin shell around `match_iter` — same retry policy, same backpressure.
+
+### 4.8 v1 ↔ v2 translation map
+
+The call layer in `_http.py` translates the v2-shaped public API to the current v1 wire. When `/v2/match` ships, this layer changes URL, body, and response parsing; no public-facing rename.
+
+| SDK / v2 (public) | v1 wire (today) |
+| --- | --- |
+| `client.match(entity, datasets=["sanctions"])` | `POST /match/sanctions` with `queries={"q": entity}` |
+| `client.match(entity, datasets=["sanctions", "us_ofac_sdn"])` | `POST /match/sanctions` with query param `include_dataset=us_ofac_sdn` |
+| `filters.exclude_entities` | query param `exclude_entity_ids` |
+| `filters.exclude_schemata` | query param `exclude_schema` |
+| `filters.exclude_datasets` | query param `exclude_dataset` |
+| `filters.changed_since` (str or datetime) | query param `changed_since` (ISO 8601 str) |
+| `MatchResponse(query, results, total, limit)` | unwrapped from `raw["responses"]["q"]` plus top-level `limit` |
+| Strict 400 on unknown property name | enforced client-side via `extra="forbid"` (names only — values pass through) |
+| Topic alias `"risk"` | resolved to `model.target_topics` client-side |
+
+The unwrap is the one structural asymmetry: v1 wraps the result in `responses["q"]`; v2 returns it flat. The call layer unwraps unconditionally so the public response shape is stable.
 
 ## 5. CLI design
 
 ### 5.1 Commands (v1)
 
 ```
-yente search QUERY [--dataset default] [--schema Thing]
+yente search QUERY [--datasets default]                    # repeatable
+                   [--schema Thing]                        # entity-type filter
                    [--limit 10] [--offset 0]
-                   [--topics sanction --topics role.pep]
-                   [--country ru] [--filter properties.birthDate:1985]
+                   [--topics sanction --topics role.pep]   # repeatable
+                   [--countries ru]                        # repeatable
+                   [--filter properties.birthDate:1985]    # repeatable
                    [--format json|jsonl|table]
 
-yente match  --schema Person
+yente match  --schema Person                               # entity type to construct
              [--first-name X] [--last-name Y] [--birth-date 1965]
-             [--property name=Acme]                 # repeatable, schema-agnostic
-             [--from-file query.json]               # alternative to flags
-             [--dataset default] [--threshold 0.7]
-             [--algorithm best]
-             [--topics sanction]
+             [--property name=Acme]                        # repeatable, schema-agnostic
+             [--from-file query.json]                      # see format note below
+             [--datasets sanctions]                        # repeatable
+             [--topics sanction --topics role.pep]
+             [--threshold 0.7] [--algorithm best] [--limit 10]
+             [--changed-since 2022-02-24]
+             [--exclude-entities Q7747]                    # repeatable
+             [--exclude-schemata Address]                  # repeatable
              [--format json|table]
 
 yente fetch  ENTITY_ID
              [--nested/--no-nested]
-             [--adjacent PROPERTY]                  # paginated adjacency
+             [--adjacent PROPERTY]                         # paginated adjacency
              [--limit 10] [--offset 0]
              [--format json|table]
 
 yente catalog    [--current-only] [--format json|table]
 yente algorithms [--format json|table]
 ```
+
+Notes:
+
+- `--datasets` (plural) is used by both `search` and `match`; the CLI translates the same way the SDK does (first → URL path param, rest → repeated `include_dataset` query params). See §4.8.
+- `--schema` is overloaded by context: on `yente search` it filters results by entity type; on `yente match` it specifies the type of entity being constructed from the other flags. Acceptable because each command has only one natural meaning for it.
+- `--from-file path.json` (for `yente match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the same wire-format dict the generic `Entity` consumes. Flag-derived properties merge into / override the file's properties.
+- CLI flag names follow the v2 conventions (`--datasets`, `--exclude-entities`, `--exclude-schemata`). The translation to v1 is identical to the SDK's.
 
 ### 5.2 Config precedence
 
@@ -262,9 +576,9 @@ yente algorithms [--format json|table]
 
 ### 5.3 Output formats
 
-- **`--format json`** (default for piping) — single JSON document. Identical to the API response.
-- **`--format jsonl`** — one entity / hit per line. Useful for `jq` and for the future `screen` command.
-- **`--format table`** (default for TTY, auto-detected) — Rich table, columns: `score | id | caption | datasets | topics`. Truncates long captions; full record available via `yente fetch ID`.
+- **`--format json`** (default for piping) — single JSON document, matching the v2-flat shape (`{query, results, total, limit}` for `match`).
+- **`--format jsonl`** — one entity / hit per line. Useful for `jq` and the `screen` command.
+- **`--format table`** (default for TTY, auto-detected) — Rich table; columns for `match`: `score | id | caption | datasets | topics`. Truncates long captions; full record available via `yente fetch ID`.
 
 ### 5.4 Exit codes
 
@@ -282,70 +596,82 @@ The zero-results-as-1 convention is deliberate: it lets shell scripts use `yente
 yente screen INPUT.csv
              --schema Person
              --map first_name:firstName --map last_name:lastName --map dob:birthDate
-             [--id-col customer_id]                # used as the query key
-             [--dataset default] [--threshold 0.7]
-             [--workers 4] [--batch-size 100]
+             [--id-col customer_id]                # used as the per-row key
+             [--datasets sanctions]
+             [--threshold 0.7]
+             [--workers 8]
              [-o OUTPUT.jsonl]
              [--resume RESUME_FILE]                # for restartability
 ```
 
-Built on `match_iter`. Streams output as it goes; resumable state file records completed input row IDs.
+Built on `match_iter`. Streams output as it goes; resumable state file records completed input row IDs. No `--batch-size` flag — wire batch size is always 1, only `--workers` matters.
 
 ## 6. TypeScript SDK design
 
 ```ts
-import { Client } from "@opensanctions/yente-client";
+import { Client, Person } from "@opensanctions/yente-client";
 
 const client = new Client({ apiKey: process.env.OPENSANCTIONS_API_KEY });
 
-const out = await client.match({
-  dataset: "default",
-  queries: { alpha: { schema: "Person", properties: { firstName: ["Aleksandr"], lastName: ["Zacharov"] } } },
-  threshold: 0.7,
-  algorithm: "best",
-});
+const hits = await client.match(
+  new Person({ firstName: "Aleksandr", lastName: "Zacharov", birthDate: "1965" }),
+  {
+    datasets: ["sanctions"],
+    topics: ["sanction"],
+    threshold: 0.7,
+    algorithm: "best",
+  },
+);
 
-for (const hit of out.responses.alpha.results) {
-  console.log(hit.id, hit.score, hit.caption);
+console.log(hits.top?.score, hits.top?.caption);
+for (const h of hits.matches) {
+  console.log(h.id, h.properties.topics);
 }
 ```
 
 Notes:
 
-- **One `Client`** — JS is async-by-default, so no need for a sync/async split. Every method returns a `Promise`.
+- **One `Client`** — JS is async-by-default, so no sync/async split.
 - **Transport:** native `fetch` (Node 20+, deno, modern browsers). No `axios`.
-- **Schema types:** use `@alephdata/followthemoney`'s exported schema name unions where they exist. For our response models, declare `zod` schemas (giving runtime validation in addition to TS types). If `@alephdata/followthemoney`'s TS types are too thin, fall back to a generated `Schema` union from the same `schemas.json` we generate for Python.
-- **Bundling:** ESM only. CJS interop via Node's auto-resolution; we don't ship a separate `.cjs` bundle.
-- **Errors:** parallel hierarchy (`YenteError`, `ApiError`, `RateLimitError`, …) with the same `.statusCode` and `.detail` shape.
+- **Schema types:** generated from the same `model/model.json` snapshot the Python SDK uses (§4.2). `entities/_generated.ts` exports a class per schema with typed kwargs; `model.types.ts` exports `Schema`, `PropertyType`, `TargetTopic` string unions. `@alephdata/followthemoney` is **not** a dependency — the bundled snapshot keeps both SDKs locked to the same model version.
+- **Match shape:** same v2-flat response; same one-call-per-entity rule; `matchMany` and `matchIter` for fan-out using `Promise.all` with a `p-limit`-style semaphore.
+- **Bundling:** ESM only. CJS interop via Node's auto-resolution.
+- **Errors:** parallel hierarchy (`YenteError`, `ApiError`, `RateLimitError`, …) with `.statusCode` and `.detail`.
 - **Browser caveat:** the hosted API allows CORS, but exposing API keys in browser JS is a bad idea. Document this; do not block the use case.
 
 ## 7. Testing
 
-- **Python:** `pytest` + `respx` (mock httpx). Fixtures include captured response bodies for `/match`, `/search`, `/entities`, `/catalog`. CLI tests use `Typer`'s `CliRunner`. A small "live" suite runs against the public API gated by `OPENSANCTIONS_API_KEY` being set in env; off by default in CI.
+- **Python:** `pytest` + `respx` (mock httpx). Fixtures include captured response bodies for `/match`, `/search`, `/entities`, `/catalog`. CLI tests use `Typer`'s `CliRunner`. Generator tests assert that `regen --check` is idempotent and that the generated entity classes round-trip through `model.json` correctly. A small "live" suite runs against the public API gated on `OPENSANCTIONS_API_KEY`; off by default in CI.
 - **TypeScript:** `vitest` + `msw` for fetch mocking. Same fixture corpus shared with the Python side under `testdata/` (top-level, language-agnostic).
 
 ## 8. Release / packaging
 
-- **PyPI** — `yente-client`. Build with `hatch`. Wheel + sdist. Versioning: semver, starting `0.1.0`.
-- **npm** — `@opensanctions/yente-client`. Built with `tsup`. Versioning: semver, starting `0.1.0`.
-- **CI:** GitHub Actions matrix; lint (`ruff`, `mypy`, `eslint`, `tsc --noEmit`) + tests. Release on tag.
+- **PyPI** — `yente-client`. Build with `hatch`. Wheel + sdist. Semver, starting `0.1.0`.
+- **npm** — `@opensanctions/yente-client`. Built with `tsup`. Semver, starting `0.1.0`.
+- **CI:** GitHub Actions matrix; lint (`ruff`, `mypy`, `eslint`, `tsc --noEmit`) + tests + `regen --check`. Release on tag.
 - **Docs:** README in each language folder with a quickstart that mirrors the official OpenSanctions quickstart, so a user finding either entry point lands on the same shape. Auto-generated API docs deferred.
 
 ## 9. Milestones
 
-1. **Skeleton + Python sync client + models + errors + tests** — covers `match`, `search`, `fetch`, `catalog`, `algorithms`, `healthz`, `readyz`. No CLI, no async, no schemas.json. End: `yente-client` 0.1 installable from source.
-2. **Schemas.json + Literal types + property type hints** — `regen_schemas.py`, generated artefacts, CI check.
+1. **Codegen pipeline + entity classes + literal types** — `scripts/regen_model.py`, Jinja templates, committed `model/model.json`, generated `python/src/yente_client/entities/_generated.py`, `schemas/_literals.py`, and TS counterparts under `typescript/src/`. CI `--check`. No HTTP client yet. End: `from yente_client.entities import Person` is importable; `mypy --strict` passes on the generated module; `regen --check` is idempotent.
+2. **Python sync Client + response models + errors + tests** — covers `match` (v2-shaped surface, v1 wire), `search`, `fetch`, `adjacent`, `catalog`, `algorithms`, `healthz`, `readyz`. Builds on M1's generated entities and bundled model. No async, no CLI. End: `yente-client` installable from source; tests pass against fixtures.
 3. **AsyncClient** — parity with `Client`, reusing the request-builder layer.
-4. **CLI v1** — `search`, `match`, `fetch`, `catalog`, `algorithms`. JSON / JSONL / table formatters. Config precedence + env var handling.
-5. **TypeScript SDK v1** — `Client` + models + errors. Native fetch. zod-based response validation.
-6. **First publish** — PyPI + npm 0.1.0, README quickstarts, GitHub Actions release on tag.
-7. **`match_iter` + `yente screen`** — threaded CSV screening, resumable. The point where the CLI starts paying for itself in real workflows.
-8. **Coverage gaps** — `/reconcile/*`, `/statements`, `/updatez`. Added as separate methods; no API redesign needed.
+4. **`match_many` / `match_iter`** — client-side fan-out, threaded + async, with bounded concurrency and `on_error` policy. SDK-level only at this stage.
+5. **CLI v1** — `search`, `match`, `fetch`, `catalog`, `algorithms`. JSON / JSONL / table formatters. Config precedence + env var handling.
+6. **TypeScript SDK v1** — `Client` + models + errors + entities. Native fetch. zod-based response validation. Uses the TS artefacts already emitted by M1's regen pipeline.
+7. **First publish** — PyPI + npm 0.1.0, README quickstarts, GitHub Actions release on tag.
+8. **`yente screen` CLI** — threaded CSV screening, resumable, on top of `match_iter`.
+9. **Coverage gaps** — `/reconcile/*`, `/statements`, `/updatez`. Added as separate methods; no API redesign needed.
+10. **`/v2/match` cut-over** — when the server ships v2, rewrite the call layer in `_http.py` only. Public API unchanged; users get strict 400 errors and dataset DSL for free.
 
-Stop and check in at the end of each milestone. Especially before publishing (step 6) — that's a one-way door.
+Stop and check in at the end of each milestone. Especially before publishing (step 7) — that's a one-way door.
 
 ## 10. Open questions to revisit
 
-- **`/statements`**: shape and pagination semantics weren't fully surveyed (the Explore agent skipped its details). Worth a short read of `yente/routers/` before milestone 8.
-- **Schema generation invocation**: do we want `regen_schemas.py` to dynamically resolve the `followthemoney` package, or to read its YAML files directly from `/home/pudo/code/followthemoney/followthemoney/schema/*.yaml`? The latter is more reproducible and avoids any Python-env coupling. Decide before milestone 2.
-- **Browser bundle for TS**: do we ship a separate browser-targeted bundle, or punt and let Vite/Webpack handle it from the ESM source? Probably the latter, but worth confirming with the website team if they intend to use this directly.
+- **Topic aliases (`"risk"`, `"all"`)**: implement client-side now (resolve to `model.target_topics` / `model.target_topics ∪ enrich_topics`) or wait for the server to canonicalise? Client-side gets the ergonomics today; server-side avoids drift if the alias semantics change. Lean: client-side, documented as a convenience that may move server-side later.
+- **`MatchFilters`/`SearchFilters` object vs kwargs as canonical**: both are supported; the docs need to pick one as primary in examples. Lean: kwargs (concise; matches the §4.1 examples). Filter objects are for reusable configs and for callers that build them programmatically.
+- **`/v2/match` self-hosted yente compatibility**: when v2 ships, do we keep the v1 call layer available for users running older yente builds, or just bump SDK major and drop v1? Lean: minor-version coexistence (the call layer probes `/v2/match` once per client and falls back to v1).
+- **`/statements`**: shape and pagination semantics weren't fully surveyed. Worth a short read of `yente/routers/` before milestone 9.
+- **Browser bundle for TS**: ship a separate browser-targeted bundle, or punt to Vite/Webpack from the ESM source? Lean: punt unless the website team wants something specific.
+- **Model snapshot drift policy**: when CI's `regen --check` fails because upstream `model.json` moved, do we auto-PR the diff (bot commit) or surface it for human review? Lean: human review — a property rename or removal can break user code and should be in release notes.
+- **`exclude_entities` size cap**: server enforces 50 today; we mirror this client-side in `MatchFilters`. Revisit on `/v2/match` cut-over — v2 spec doesn't promise the limit and we may want to relax or remove the client-side check then.
