@@ -46,7 +46,7 @@ class _EntityBase(BaseModel):
     They also attach a wildcard ``field_validator`` that runs ``_coerce_property``.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str | None = None
     schema_: ClassVar[str]
@@ -58,7 +58,11 @@ class _EntityBase(BaseModel):
         Empty property lists are omitted from ``properties`` so the wire
         payload only carries fields the caller actually set.
         """
-        props = {name: value for name, value in self.model_dump(exclude={"id"}).items() if value}
+        props = {
+            name: value
+            for name, value in self.model_dump(exclude={"id"}, by_alias=True).items()
+            if value
+        }
         payload: dict[str, Any] = {"schema": self.schema_, "properties": props}
         if self.id is not None:
             payload["id"] = self.id
