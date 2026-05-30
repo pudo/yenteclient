@@ -1,12 +1,8 @@
 """Asynchronous yente / OpenSanctions client.
 
-Mirrors :class:`yente_client.client.Client` method-for-method but each endpoint
-returns a coroutine instead of a value. Constructor surface is identical.
-
-The structural difference from the sync client is per-language requirement:
-``match`` / ``match_many`` become coroutines (caller writes ``await``), and
-the streaming ``match_iter`` (M4) will return an ``AsyncIterator`` instead of
-an ``Iterator``. Method names and kwarg sets are unchanged.
+Mirrors :class:`yente_client.client.Client` method-for-method; every endpoint
+returns a coroutine. Refer to the sync client for per-method documentation —
+the only structural differences are language-level (``await``, ``async for``).
 """
 
 from types import TracebackType
@@ -77,7 +73,7 @@ class AsyncClient:
 
     @property
     def user_agent(self) -> str:
-        """The User-Agent header this client sends on every request."""
+        """Return the User-Agent header this client sends on every request."""
         return self._http.headers["User-Agent"]
 
     async def aclose(self) -> None:
@@ -98,9 +94,9 @@ class AsyncClient:
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         """Issue one HTTP request; map errors and decode JSON.
 
-        Mirror of :meth:`Client._request` but awaitable. Same error semantics:
-        ``APIError`` subclass on non-2xx, ``TransportError`` on connection-level
-        failure.
+        Async mirror of :meth:`yente_client.client.Client._request`. Same
+        error semantics: :class:`APIError` subclass on non-2xx,
+        :class:`TransportError` on connection-level failure.
         """
         try:
             response = await self._http.request(method, path, **kwargs)
@@ -115,22 +111,27 @@ class AsyncClient:
     # ----- system / health endpoints -----
 
     async def healthz(self) -> StatusResponse:
+        """Async equivalent of :meth:`yente_client.client.Client.healthz`."""
         return StatusResponse.model_validate(await self._request("GET", "/healthz"))
 
     async def readyz(self) -> StatusResponse:
+        """Async equivalent of :meth:`yente_client.client.Client.readyz`."""
         return StatusResponse.model_validate(await self._request("GET", "/readyz"))
 
     # ----- catalog / introspection -----
 
     async def catalog(self) -> CatalogResponse:
+        """Async equivalent of :meth:`yente_client.client.Client.catalog`."""
         return CatalogResponse.model_validate(await self._request("GET", "/catalog"))
 
     async def algorithms(self) -> AlgorithmsResponse:
+        """Async equivalent of :meth:`yente_client.client.Client.algorithms`."""
         return AlgorithmsResponse.model_validate(await self._request("GET", "/algorithms"))
 
     # ----- entity fetch -----
 
     async def fetch(self, entity_id: str, *, nested: bool = True) -> Entity:
+        """Async equivalent of :meth:`yente_client.client.Client.fetch`."""
         params = {"nested": "true" if nested else "false"}
         path = f"/entities/{quote(entity_id, safe='')}"
         return Entity.model_validate(await self._request("GET", path, params=params))
@@ -166,6 +167,7 @@ class AsyncClient:
         offset: int = 0,
         sort: list[str] | None = None,
     ) -> AdjacentResponse | AdjacentPropertyResponse:
+        """Async equivalent of :meth:`yente_client.client.Client.adjacent`."""
         params: dict[str, Any] = {"offset": offset}
         if limit is not None:
             params["limit"] = limit
@@ -196,6 +198,7 @@ class AsyncClient:
         facets: list[str] | None = None,
         **filter_kwargs: Any,
     ) -> SearchResponse:
+        """Async equivalent of :meth:`yente_client.client.Client.search`."""
         f = merge_filters(SearchFilters, filters, filter_kwargs)
         dataset, params = serialise_search_filters(f)
 
@@ -230,6 +233,7 @@ class AsyncClient:
         limit: int | None = None,
         **filter_kwargs: Any,
     ) -> MatchResponse:
+        """Async equivalent of :meth:`yente_client.client.Client.match`."""
         f = merge_filters(MatchFilters, filters, filter_kwargs)
         dataset, params = serialise_match_filters(f)
 

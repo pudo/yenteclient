@@ -54,7 +54,7 @@ class RateLimitError(APIError):
     """HTTP 429 — rate limit exceeded.
 
     Carries ``retry_after`` (seconds) when the server provided the header.
-    Retries are not built into M2; users handle this manually for now.
+    Automatic retries are not built into the client; callers handle backoff.
     """
 
     def __init__(

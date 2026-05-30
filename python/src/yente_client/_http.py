@@ -76,7 +76,7 @@ def build_user_agent(app_name: str | None = None, override: str | None = None) -
 
 
 def looks_hosted(base_url: str) -> bool:
-    """True when ``base_url`` points at the hosted OpenSanctions API."""
+    """Return True when ``base_url`` points at the hosted OpenSanctions API."""
     return any(host in base_url for host in _HOSTED_HOSTS)
 
 

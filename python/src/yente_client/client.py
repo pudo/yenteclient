@@ -1,9 +1,4 @@
-"""Synchronous yente / OpenSanctions client.
-
-Endpoint methods (match, search, fetch, …) land in subsequent M2 phases.
-This module ships the constructor, the request/error plumbing, and the
-context-manager protocol — everything endpoints will share.
-"""
+"""Synchronous yente / OpenSanctions client."""
 
 from typing import Any, Final, Self, overload
 from urllib.parse import quote
@@ -77,7 +72,7 @@ class Client:
 
     @property
     def user_agent(self) -> str:
-        """The User-Agent header this client sends on every request."""
+        """Return the User-Agent header this client sends on every request."""
         return self._http.headers["User-Agent"]
 
     def close(self) -> None:
@@ -110,29 +105,30 @@ class Client:
     # ----- system / health endpoints -----
 
     def healthz(self) -> StatusResponse:
-        """Liveness check. ``{"status": "ok"}`` whenever the server is up.
+        """Probe server liveness.
 
-        Useful for Kubernetes liveness probes. See ``readyz()`` for index
-        readiness.
+        Returns ``{"status": "ok"}`` whenever the server process is up. Useful
+        for Kubernetes liveness probes. See :meth:`readyz` for index readiness,
+        which can fail independently.
         """
         return StatusResponse.model_validate(self._request("GET", "/healthz"))
 
     def readyz(self) -> StatusResponse:
-        """Readiness check: confirms the search index is ready to serve queries.
+        """Probe whether the search index is ready to serve queries.
 
-        Returns the same shape as ``healthz()`` but the server returns 503 (which
-        we map to ``ServerError``) until the index is loaded.
+        Returns the same shape as :meth:`healthz`, but the server returns 503
+        (mapped to :class:`ServerError`) until the index is loaded.
         """
         return StatusResponse.model_validate(self._request("GET", "/readyz"))
 
     # ----- catalog / introspection -----
 
     def catalog(self) -> CatalogResponse:
-        """Return the catalog of indexed datasets and their freshness state."""
+        """Fetch the catalog of indexed datasets and their freshness state."""
         return CatalogResponse.model_validate(self._request("GET", "/catalog"))
 
     def algorithms(self) -> AlgorithmsResponse:
-        """Return the list of enabled matching algorithms with their defaults."""
+        """Fetch the list of enabled matching algorithms and the server's defaults."""
         return AlgorithmsResponse.model_validate(self._request("GET", "/algorithms"))
 
     # ----- entity fetch -----
@@ -140,10 +136,10 @@ class Client:
     def fetch(self, entity_id: str, *, nested: bool = True) -> Entity:
         """Fetch a single entity by ID.
 
-        Follows ``308`` redirects transparently when the supplied ID is a
-        referent of a canonical entity (`follow_redirects=True` is set on the
-        httpx client). Pass ``nested=False`` for a lighter response that
-        omits adjacent entities like sanctions and ownership links.
+        Follows ``308`` redirects transparently when ``entity_id`` is a
+        referent of a canonical entity. Pass ``nested=False`` for a lighter
+        response that omits adjacent entities like sanctions and ownership
+        links.
         """
         params = {"nested": "true" if nested else "false"}
         path = f"/entities/{quote(entity_id, safe='')}"
@@ -180,7 +176,7 @@ class Client:
         offset: int = 0,
         sort: list[str] | None = None,
     ) -> AdjacentResponse | AdjacentPropertyResponse:
-        """Paginated adjacency for an entity.
+        """Fetch the adjacency map for an entity, optionally restricted to one property.
 
         Without ``prop``: returns the full adjacency map keyed by property
         name. With ``prop``: returns paginated results for that one property.
@@ -213,15 +209,13 @@ class Client:
         facets: list[str] | None = None,
         **filter_kwargs: Any,
     ) -> SearchResponse:
-        """Full-text search across one or more datasets.
+        """Run a full-text search across one or more datasets.
 
         Pass filter fields either via ``filters=SearchFilters(...)`` or as
-        kwargs (``datasets=[...]``, ``schema=``, ``countries=[...]``, …).
-        Kwargs win over a passed-in filters object on the fields they specify.
-
-        The ``datasets`` filter is translated to the v1 wire as
-        ``/search/<first-dataset>`` with the rest passed as repeated
-        ``include_dataset`` query params; see §4.8.
+        kwargs (``datasets=[...]``, ``schema=``, ``countries=[...]``, …);
+        kwargs win on any field they specify. The ``datasets`` filter is
+        translated to the v1 wire as ``/search/<first-dataset>`` with the
+        rest passed as repeated ``include_dataset`` query params (§4.8).
         """
         f = merge_filters(SearchFilters, filters, filter_kwargs)
         dataset, params = serialise_search_filters(f)
@@ -257,21 +251,22 @@ class Client:
         limit: int | None = None,
         **filter_kwargs: Any,
     ) -> MatchResponse:
-        """Query-by-example match against a dataset.
+        """Match an entity against a dataset by example.
 
         Constructs a single-query payload on the v1 wire (``queries={"q":
         entity.to_payload()}``) and unwraps the response into a flat
-        ``MatchResponse``. The unwrap is the one structural difference from
-        v2's planned shape (§4.8): swap it out when ``/v2/match`` ships.
+        :class:`MatchResponse`. The unwrap is the one structural difference
+        from v2's planned shape (§4.8): swap out :func:`unwrap_match_response`
+        when ``/v2/match`` ships.
 
         Pass filter fields either via ``filters=MatchFilters(...)`` or as
-        kwargs (``datasets=[...]``, ``topics=[...]``, ``exclude_entities=[...]``).
-        Kwargs win over a passed-in filters object on the fields they specify.
+        kwargs (``datasets=[...]``, ``topics=[...]``, ``exclude_entities=[...]``);
+        kwargs win on any field they specify.
 
-        ``algorithm`` is a string — common values are ``"best"`` (the
-        canonical default; ``BEST_ALGORITHM`` exposed at module level),
-        ``"logic-v2"``, ``"name-matcher"``. The full set is dynamic and can
-        be retrieved via ``client.algorithms()``.
+        Args:
+            algorithm: Server-side algorithm name. Common values: ``"best"``
+                (use ``BEST_ALGORITHM``), ``"logic-v2"``, ``"name-matcher"``.
+                The full set is dynamic via :meth:`algorithms`.
         """
         f = merge_filters(MatchFilters, filters, filter_kwargs)
         dataset, params = serialise_match_filters(f)

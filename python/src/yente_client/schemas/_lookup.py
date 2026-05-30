@@ -16,7 +16,7 @@ model: dict[str, Any] = _RAW["model"]
 
 
 def has_schema(name: str) -> bool:
-    """True if ``name`` is a valid schema in the bundled model."""
+    """Return True if ``name`` is a valid schema in the bundled model."""
     return name in model["schemata"]
 
 
@@ -39,9 +39,10 @@ def iter_properties(schema: str) -> Iterator[str]:
 
 
 def is_a(schema: str, ancestor: str) -> bool:
-    """True if ``schema`` extends ``ancestor`` transitively (reflexive on ``schema`` itself).
+    """Return True if ``schema`` extends ``ancestor`` transitively.
 
-    O(1) lookup against the pre-flattened ``schemata`` list, no MRO walk needed.
+    Reflexive on ``schema`` itself. O(1) lookup against the pre-flattened
+    ``schemata`` list — no MRO walk needed.
     """
     if not has_schema(schema):
         raise KeyError(schema)
@@ -49,7 +50,7 @@ def is_a(schema: str, ancestor: str) -> bool:
 
 
 def is_deprecated(schema: str, prop: str) -> bool:
-    """True if ``prop`` is marked ``deprecated`` on ``schema`` or any ancestor."""
+    """Return True if ``prop`` is marked ``deprecated`` on ``schema`` or any ancestor."""
     if not has_schema(schema):
         raise KeyError(schema)
     for ancestor in model["schemata"][schema]["schemata"]:
