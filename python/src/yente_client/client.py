@@ -14,13 +14,16 @@ from urllib.parse import quote
 import httpx
 
 from ._http import build_user_agent, raise_for_response, validate_app_name
+from ._translation import merge_filters, serialise_search_filters
 from .exceptions import TransportError
+from .filters import SearchFilters
 from .models import (
     AdjacentPropertyResponse,
     AdjacentResponse,
     AlgorithmsResponse,
     CatalogResponse,
     Entity,
+    SearchResponse,
     StatusResponse,
 )
 
@@ -207,3 +210,48 @@ class Client:
             return AdjacentResponse.model_validate(raw)
         path = f"/entities/{eid}/adjacent/{quote(prop, safe='')}"
         return AdjacentPropertyResponse.model_validate(self._request("GET", path, params=params))
+
+    # ----- search -----
+
+    def search(
+        self,
+        q: str,
+        *,
+        filters: SearchFilters | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        sort: list[str] | None = None,
+        fuzzy: bool = False,
+        simple: bool = False,
+        facets: list[str] | None = None,
+        **filter_kwargs: Any,
+    ) -> SearchResponse:
+        """Full-text search across one or more datasets.
+
+        Pass filter fields either via ``filters=SearchFilters(...)`` or as
+        kwargs (``datasets=[...]``, ``schema=``, ``countries=[...]``, …).
+        Kwargs win over a passed-in filters object on the fields they specify.
+
+        The ``datasets`` filter is translated to the v1 wire as
+        ``/search/<first-dataset>`` with the rest passed as repeated
+        ``include_dataset`` query params; see §4.8.
+        """
+        f = merge_filters(SearchFilters, filters, filter_kwargs)
+        dataset, params = serialise_search_filters(f)
+
+        params["q"] = q
+        params["offset"] = offset
+        if limit is not None:
+            params["limit"] = limit
+        if sort:
+            params["sort"] = sort
+        if fuzzy:
+            params["fuzzy"] = "true"
+        if simple:
+            params["simple"] = "true"
+        if facets:
+            params["facets"] = facets
+
+        return SearchResponse.model_validate(
+            self._request("GET", f"/search/{quote(dataset, safe='')}", params=params)
+        )

@@ -1,0 +1,45 @@
+{
+  "results": [
+    {
+      "id": "NK-aU5ybkbRFJucf8YMwsJvDw",
+      "caption": "Alexander Vyacheslavovich ZAKHAROV",
+      "schema": "Person",
+      "properties": {
+        "firstName": ["Aleksandr"],
+        "lastName": ["Zacharov"],
+        "topics": ["sanction"]
+      },
+      "datasets": ["eu_fsf"],
+      "target": true
+    },
+    {
+      "id": "Q12345",
+      "caption": "Acme Trading Co.",
+      "schema": "Company",
+      "properties": {
+        "name": ["Acme Trading Co."],
+        "jurisdiction": ["us"]
+      },
+      "datasets": ["us_ofac_sdn"],
+      "target": false
+    }
+  ],
+  "facets": {
+    "countries": {
+      "label": "Countries",
+      "values": [
+        {"name": "us", "label": "United States", "count": 12},
+        {"name": "ru", "label": "Russia", "count": 8}
+      ]
+    },
+    "topics": {
+      "label": "Topics",
+      "values": [
+        {"name": "sanction", "label": "Sanctioned", "count": 15}
+      ]
+    }
+  },
+  "total": {"value": 2, "relation": "eq"},
+  "limit": 10,
+  "offset": 0
+}
