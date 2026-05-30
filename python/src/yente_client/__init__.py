@@ -7,6 +7,7 @@ classes either as ``from yente_client import Person, Company`` or
 
 from __future__ import annotations
 
+from .async_client import AsyncClient
 from .client import BEST_ALGORITHM, Client
 
 # Re-export every per-schema entity class (Person, Company, Vessel, ...).
@@ -49,6 +50,7 @@ __all__ = [
     # Constants
     "BEST_ALGORITHM",
     # Client
+    "AsyncClient",
     "Client",
     # Entity input types
     "EntityInput",

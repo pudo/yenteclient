@@ -7,14 +7,18 @@ context-manager protocol — everything endpoints will share.
 
 from __future__ import annotations
 
-import warnings
 from typing import Any, Final, Self, overload
 from urllib.parse import quote
 
 import httpx
 
-from ._http import build_user_agent, raise_for_response, validate_app_name
-from ._translation import merge_filters, serialise_match_filters, serialise_search_filters
+from ._http import prepare_http_kwargs, raise_for_response
+from ._translation import (
+    merge_filters,
+    serialise_match_filters,
+    serialise_search_filters,
+    unwrap_match_response,
+)
 from .entities import EntityInput
 from .exceptions import TransportError
 from .filters import MatchFilters, SearchFilters
@@ -33,8 +37,6 @@ BEST_ALGORITHM: Final[str] = "best"
 """Canonical algorithm name resolving to whichever scoring algorithm the
 server currently recommends. Stable across algorithm version bumps — pass
 ``algorithm=BEST_ALGORITHM`` for forward-compatibility."""
-
-_HOSTED_HOSTS = ("api.opensanctions.org", "api.test.opensanctions.org")
 
 
 class Client:
@@ -58,42 +60,22 @@ class Client:
         headers: dict[str, str] | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        if app_name is not None:
-            validate_app_name(app_name)
-
-        if api_key is None and self._looks_hosted(base_url):
-            warnings.warn(
-                "Client constructed against the hosted OpenSanctions API without an "
-                "api_key. Set api_key= or pass OPENSANCTIONS_API_KEY via env.",
-                stacklevel=2,
-            )
-
-        # Caller's headers go in first; ours (Authorization, User-Agent) win.
-        merged_headers: dict[str, str] = dict(headers or {})
-        if api_key:
-            merged_headers["Authorization"] = f"ApiKey {api_key}"
-        merged_headers["User-Agent"] = build_user_agent(app_name=app_name, override=user_agent)
-
-        client_kwargs: dict[str, Any] = {
-            "base_url": base_url.rstrip("/"),
-            "headers": merged_headers,
-            "timeout": timeout or httpx.Timeout(30.0, connect=10.0),
-            "follow_redirects": True,
-            "verify": verify,
-        }
-        if proxy is not None:
-            client_kwargs["proxy"] = proxy
-        # If the caller provided a transport (typically respx.MockTransport for
-        # tests), use it verbatim. Otherwise stack httpx's connection-level
-        # retries so DNS / connection-refused failures get a free retry.
-        client_kwargs["transport"] = transport or httpx.HTTPTransport(retries=2)
-
-        self._http = httpx.Client(**client_kwargs)
+        kwargs = prepare_http_kwargs(
+            api_key=api_key,
+            base_url=base_url,
+            app_name=app_name,
+            user_agent=user_agent,
+            timeout=timeout,
+            verify=verify,
+            proxy=proxy,
+            headers=headers,
+        )
+        # Caller-supplied transport (typically `httpx.MockTransport` for tests)
+        # bypasses the default. Otherwise stack httpx's connection-level retries
+        # so DNS / connection-refused failures get a free retry.
+        kwargs["transport"] = transport or httpx.HTTPTransport(retries=2)
+        self._http = httpx.Client(**kwargs)
         self._base_url = base_url
-
-    @staticmethod
-    def _looks_hosted(base_url: str) -> bool:
-        return any(host in base_url for host in _HOSTED_HOSTS)
 
     @property
     def user_agent(self) -> str:
@@ -311,16 +293,4 @@ class Client:
 
         raw = self._request("POST", f"/match/{quote(dataset, safe='')}", params=params, json=body)
 
-        return MatchResponse.model_validate(_unwrap_match_response(raw))
-
-
-def _unwrap_match_response(raw: dict[str, Any]) -> dict[str, Any]:
-    """Translate the v1 ``{responses: {q: {...}}, limit: N}`` envelope into
-    the v2-shaped flat ``{query, results, total, limit}`` MatchResponse takes."""
-    inner = raw["responses"]["q"]
-    return {
-        "query": inner["query"],
-        "results": inner["results"],
-        "total": inner["total"],
-        "limit": raw["limit"],
-    }
+        return MatchResponse.model_validate(unwrap_match_response(raw))

@@ -97,3 +97,17 @@ def serialise_match_filters(f: MatchFilters) -> tuple[str, dict[str, Any]]:
     if f.exclude_entities:
         params["exclude_entity_ids"] = f.exclude_entities
     return dataset, params
+
+
+def unwrap_match_response(raw: dict[str, Any]) -> dict[str, Any]:
+    """Translate v1's ``{responses: {q: {...}}, limit}`` envelope into the
+    v2-shaped flat ``{query, results, total, limit}`` that ``MatchResponse``
+    takes. This is the single biggest structural divergence between v1 and v2
+    and lives here so the v2 cut-over only touches one file (§4.8)."""
+    inner = raw["responses"]["q"]
+    return {
+        "query": inner["query"],
+        "results": inner["results"],
+        "total": inner["total"],
+        "limit": raw["limit"],
+    }

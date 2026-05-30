@@ -28,6 +28,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+    "pytest-asyncio>=0.23",
     "pytest-cov",
     "respx>=0.21",
     "ruff>=0.6",
@@ -64,6 +65,7 @@ files = ["src/yente_client"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+asyncio_mode = "auto"
 markers = [
     "live: requires a live yente API (env: OPENSANCTIONS_API_KEY); skip by default with -m 'not live'",
 ]

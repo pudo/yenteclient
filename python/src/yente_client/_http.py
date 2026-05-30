@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import re
 import sys
+import warnings
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
@@ -23,6 +24,8 @@ from .exceptions import (
     RateLimitError,
     ServerError,
 )
+
+_HOSTED_HOSTS = ("api.opensanctions.org", "api.test.opensanctions.org")
 
 # Reject characters that would break the User-Agent grammar:
 # whitespace, parentheses (used to delimit comment blocks), semicolons
@@ -72,6 +75,61 @@ def build_user_agent(app_name: str | None = None, override: str | None = None) -
     parts.append(f"python/{py}")
     parts.append(f"httpx/{httpx.__version__}")
     return f"yente-client/{_client_version()} ({'; '.join(parts)})"
+
+
+def looks_hosted(base_url: str) -> bool:
+    """True when ``base_url`` points at the hosted OpenSanctions API."""
+    return any(host in base_url for host in _HOSTED_HOSTS)
+
+
+def prepare_http_kwargs(
+    *,
+    api_key: str | None,
+    base_url: str,
+    app_name: str | None,
+    user_agent: str | None,
+    timeout: float | httpx.Timeout | None,
+    verify: bool | str,
+    proxy: str | None,
+    headers: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Assemble the kwargs shared between ``httpx.Client`` and ``httpx.AsyncClient``.
+
+    Caller is responsible for setting ``transport=`` since sync and async use
+    different transport base classes (``httpx.HTTPTransport`` vs
+    ``httpx.AsyncHTTPTransport``).
+
+    Side effects:
+      - Raises ``ConfigurationError`` on an invalid ``app_name``.
+      - Emits a one-shot ``UserWarning`` when no ``api_key`` is set and
+        ``base_url`` points at the hosted API.
+    """
+    if app_name is not None:
+        validate_app_name(app_name)
+
+    if api_key is None and looks_hosted(base_url):
+        warnings.warn(
+            "Client constructed against the hosted OpenSanctions API without an "
+            "api_key. Set api_key= or pass OPENSANCTIONS_API_KEY via env.",
+            stacklevel=3,
+        )
+
+    # Caller's headers go in first; our Authorization / User-Agent win.
+    merged_headers: dict[str, str] = dict(headers or {})
+    if api_key:
+        merged_headers["Authorization"] = f"ApiKey {api_key}"
+    merged_headers["User-Agent"] = build_user_agent(app_name=app_name, override=user_agent)
+
+    kwargs: dict[str, Any] = {
+        "base_url": base_url.rstrip("/"),
+        "headers": merged_headers,
+        "timeout": timeout or httpx.Timeout(30.0, connect=10.0),
+        "follow_redirects": True,
+        "verify": verify,
+    }
+    if proxy is not None:
+        kwargs["proxy"] = proxy
+    return kwargs
 
 
 def raise_for_response(response: httpx.Response) -> None:
