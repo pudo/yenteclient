@@ -1,0 +1,24 @@
+{
+  "id": "NK-aU5ybkbRFJucf8YMwsJvDw",
+  "caption": "Alexander Vyacheslavovich ZAKHAROV",
+  "schema": "Person",
+  "properties": {
+    "firstName": ["Aleksandr"],
+    "lastName": ["Zacharov"],
+    "topics": ["sanction"],
+    "sanctions": [
+      {
+        "id": "sanction-eu-2022-01",
+        "caption": "EU Restrictive Measure",
+        "schema": "Sanction",
+        "properties": {
+          "authority": ["European Union"],
+          "program": ["EU-UKR"],
+          "startDate": ["2022-02-25"]
+        }
+      }
+    ]
+  },
+  "datasets": ["eu_fsf"],
+  "target": true
+}

@@ -8,12 +8,21 @@ context-manager protocol — everything endpoints will share.
 from __future__ import annotations
 
 import warnings
-from typing import Any, Self
+from typing import Any, Self, overload
+from urllib.parse import quote
 
 import httpx
 
 from ._http import build_user_agent, raise_for_response, validate_app_name
 from .exceptions import TransportError
+from .models import (
+    AdjacentPropertyResponse,
+    AdjacentResponse,
+    AlgorithmsResponse,
+    CatalogResponse,
+    Entity,
+    StatusResponse,
+)
 
 _HOSTED_HOSTS = ("api.opensanctions.org", "api.test.opensanctions.org")
 
@@ -107,3 +116,94 @@ class Client:
             raise_for_response(response)
 
         return response.json()
+
+    # ----- system / health endpoints -----
+
+    def healthz(self) -> StatusResponse:
+        """Liveness check. ``{"status": "ok"}`` whenever the server is up.
+
+        Useful for Kubernetes liveness probes. See ``readyz()`` for index
+        readiness.
+        """
+        return StatusResponse.model_validate(self._request("GET", "/healthz"))
+
+    def readyz(self) -> StatusResponse:
+        """Readiness check: confirms the search index is ready to serve queries.
+
+        Returns the same shape as ``healthz()`` but the server returns 503 (which
+        we map to ``ServerError``) until the index is loaded.
+        """
+        return StatusResponse.model_validate(self._request("GET", "/readyz"))
+
+    # ----- catalog / introspection -----
+
+    def catalog(self) -> CatalogResponse:
+        """Return the catalog of indexed datasets and their freshness state."""
+        return CatalogResponse.model_validate(self._request("GET", "/catalog"))
+
+    def algorithms(self) -> AlgorithmsResponse:
+        """Return the list of enabled matching algorithms with their defaults."""
+        return AlgorithmsResponse.model_validate(self._request("GET", "/algorithms"))
+
+    # ----- entity fetch -----
+
+    def fetch(self, entity_id: str, *, nested: bool = True) -> Entity:
+        """Fetch a single entity by ID.
+
+        Follows ``308`` redirects transparently when the supplied ID is a
+        referent of a canonical entity (`follow_redirects=True` is set on the
+        httpx client). Pass ``nested=False`` for a lighter response that
+        omits adjacent entities like sanctions and ownership links.
+        """
+        params = {"nested": "true" if nested else "false"}
+        path = f"/entities/{quote(entity_id, safe='')}"
+        return Entity.model_validate(self._request("GET", path, params=params))
+
+    @overload
+    def adjacent(
+        self,
+        entity_id: str,
+        *,
+        prop: None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        sort: list[str] | None = None,
+    ) -> AdjacentResponse: ...
+
+    @overload
+    def adjacent(
+        self,
+        entity_id: str,
+        *,
+        prop: str,
+        limit: int | None = None,
+        offset: int = 0,
+        sort: list[str] | None = None,
+    ) -> AdjacentPropertyResponse: ...
+
+    def adjacent(
+        self,
+        entity_id: str,
+        *,
+        prop: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        sort: list[str] | None = None,
+    ) -> AdjacentResponse | AdjacentPropertyResponse:
+        """Paginated adjacency for an entity.
+
+        Without ``prop``: returns the full adjacency map keyed by property
+        name. With ``prop``: returns paginated results for that one property.
+        """
+        params: dict[str, Any] = {"offset": offset}
+        if limit is not None:
+            params["limit"] = limit
+        if sort:
+            params["sort"] = sort
+
+        eid = quote(entity_id, safe="")
+        if prop is None:
+            raw = self._request("GET", f"/entities/{eid}/adjacent", params=params)
+            return AdjacentResponse.model_validate(raw)
+        path = f"/entities/{eid}/adjacent/{quote(prop, safe='')}"
+        return AdjacentPropertyResponse.model_validate(self._request("GET", path, params=params))

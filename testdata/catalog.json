@@ -1,0 +1,21 @@
+{
+  "datasets": [
+    {
+      "name": "default",
+      "title": "Default Collection",
+      "description": "Combined dataset",
+      "version": "20260530",
+      "entities_url": "https://data.opensanctions.org/datasets/20260530/default/entities.ftm.json",
+      "index_current": true
+    },
+    {
+      "name": "us_ofac_sdn",
+      "title": "US OFAC Specially Designated Nationals",
+      "version": "20260530",
+      "index_current": true
+    }
+  ],
+  "current": ["default", "us_ofac_sdn"],
+  "outdated": [],
+  "index_stale": false
+}

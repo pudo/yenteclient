@@ -1,0 +1,15 @@
+{
+  "algorithms": [
+    {
+      "name": "logic-v2",
+      "description": "Logic-based scoring v2",
+      "docs": {"name_match": "Compares names and aliases"}
+    },
+    {
+      "name": "name-matcher",
+      "description": "Name-only scoring"
+    }
+  ],
+  "default": "best",
+  "best": "logic-v2"
+}

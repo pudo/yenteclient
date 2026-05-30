@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "id": "sanction-1",
+      "caption": "EU sanction 2022",
+      "schema": "Sanction",
+      "properties": {"authority": ["EU"], "startDate": ["2022-02-25"]}
+    },
+    {
+      "id": "sanction-2",
+      "caption": "UK sanction 2022",
+      "schema": "Sanction",
+      "properties": {"authority": ["UK"], "startDate": ["2022-03-01"]}
+    }
+  ],
+  "total": {"value": 2, "relation": "eq"},
+  "limit": 10,
+  "offset": 0
+}
