@@ -21,29 +21,22 @@ def merge_filters(cls: type[FT], filters: FT | None, kwargs: dict[str, Any]) -> 
     """Merge endpoint ``**kwargs`` into an optional ``filters=`` object.
 
     Kwargs win on any field they explicitly specify. ``None`` in a kwarg means
-    "not supplied" rather than "clear this field", so a caller passing only
-    ``filters=`` doesn't have its values clobbered by missing kwargs.
+    "not supplied" rather than "clear this field" — endpoint methods declare
+    most filter kwargs as ``... = None`` defaults and we don't want a caller
+    passing only ``filters=`` to have its values clobbered by missing kwargs.
 
-    Aliases are resolved (``schema=`` becomes ``schema_=``) so kwargs can
-    target a filter field by either its Python name or its wire alias.
+    Alias resolution piggybacks on ``cls.model_validate`` — kwargs go through
+    the model's own validator, which already handles ``schema=`` ↔ ``schema_=``
+    and ``filter=`` ↔ ``filter_=`` via ``populate_by_name=True``. Unknown
+    kwargs raise ``ValidationError`` via the model's ``extra="forbid"``.
     """
     explicit = {k: v for k, v in kwargs.items() if v is not None}
-    explicit = {_resolve_alias(cls, k): v for k, v in explicit.items()}
-
+    overrides = cls.model_validate(explicit)
     if filters is None:
-        return cls(**explicit)
-
+        return overrides
     base = filters.model_dump()
-    base.update(explicit)
+    base.update(overrides.model_dump(exclude_unset=True))
     return cls(**base)
-
-
-def _resolve_alias(cls: type[BaseModel], key: str) -> str:
-    """Map an alias back to its field name; passes through field names unchanged."""
-    for field_name, field_info in cls.model_fields.items():
-        if field_info.alias == key:
-            return field_name
-    return key
 
 
 def datasets_for_wire(datasets: list[str] | None) -> tuple[str, list[str]]:
