@@ -36,9 +36,35 @@ jobs:
         working-directory: python
         run: mypy
 
-      - name: pytest
+      - name: pytest (offline)
         working-directory: python
-        run: pytest
+        run: pytest -m "not live"
 
       - name: regen_model.py --check (drift detector)
         run: python scripts/regen_model.py --check --skip-fetch
+
+  live-api:
+    # Runs only after the offline matrix is green, and only when secrets are
+    # available — i.e. on push to main or on PRs from the same repo. PRs from
+    # forks skip this job by design (Actions hides secrets from them).
+    needs: python
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package + dev dependencies
+        run: pip install -e python/.[dev]
+
+      - name: pytest -m live
+        working-directory: python
+        env:
+          OPENSANCTIONS_API_KEY: ${{ secrets.OPENSANCTIONS_API_KEY }}
+          YENTE_BASE_URL: ${{ secrets.YENTE_BASE_URL }}
+        run: pytest -m live -v

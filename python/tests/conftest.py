@@ -1,18 +1,35 @@
-"""Shared test fixtures: testdata loader and a helper to build a Client with a stubbed transport."""
+"""Shared test fixtures.
+
+- ``load_fixture(name)`` reads ``testdata/<name>.json`` at the repo root
+  (language-agnostic; the future TS SDK loads the same corpus).
+- ``make_client(handler=)`` builds a ``Client`` wired up to a
+  ``httpx.MockTransport`` so respx-style unit tests don't touch the network.
+- ``live_client`` builds a ``Client`` against a real yente instance when
+  ``OPENSANCTIONS_API_KEY`` is set; otherwise the test that requested it
+  is skipped. Reads ``.env`` at the repo root for local-dev convenience —
+  CI relies on env vars provided by repo secrets instead.
+"""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import httpx
 import pytest
+from dotenv import load_dotenv
 
 from yente_client.client import Client
 
 # Top-level testdata/ at the repo root, shared with the future TS SDK.
 TESTDATA_DIR = Path(__file__).resolve().parent.parent.parent / "testdata"
+
+# Load .env if present (repo root, gitignored). CI uses secrets directly.
+_ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
+if _ENV_PATH.exists():
+    load_dotenv(_ENV_PATH)
 
 
 @pytest.fixture
@@ -46,3 +63,20 @@ def make_client() -> Callable[..., Client]:
         return Client(api_key=api_key, base_url=base_url, transport=httpx.MockTransport(handler))
 
     return _factory
+
+
+@pytest.fixture
+def live_client() -> Iterator[Client]:
+    """A ``Client`` against the real yente API.
+
+    Skips when ``OPENSANCTIONS_API_KEY`` is unset (CI without secrets,
+    local without .env). ``YENTE_BASE_URL`` overrides the default; we
+    default to the *test* instance so accidental local runs don't hit
+    production. CI sets ``YENTE_BASE_URL`` explicitly via secrets.
+    """
+    key = os.environ.get("OPENSANCTIONS_API_KEY")
+    if not key:
+        pytest.skip("OPENSANCTIONS_API_KEY not set; skipping live tests")
+    base_url = os.environ.get("YENTE_BASE_URL", "https://api.test.opensanctions.org")
+    with Client(api_key=key, base_url=base_url, app_name="yenteclient-tests") as client:
+        yield client
