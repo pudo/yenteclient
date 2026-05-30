@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "yente-client"
 version = "0.0.1"
 description = "Client SDK for the yente / OpenSanctions matching API."
+readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [{ name = "OpenSanctions" }]
