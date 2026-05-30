@@ -8,24 +8,31 @@ context-manager protocol — everything endpoints will share.
 from __future__ import annotations
 
 import warnings
-from typing import Any, Self, overload
+from typing import Any, Final, Self, overload
 from urllib.parse import quote
 
 import httpx
 
 from ._http import build_user_agent, raise_for_response, validate_app_name
-from ._translation import merge_filters, serialise_search_filters
+from ._translation import merge_filters, serialise_match_filters, serialise_search_filters
+from .entities import EntityInput
 from .exceptions import TransportError
-from .filters import SearchFilters
+from .filters import MatchFilters, SearchFilters
 from .models import (
     AdjacentPropertyResponse,
     AdjacentResponse,
     AlgorithmsResponse,
     CatalogResponse,
     Entity,
+    MatchResponse,
     SearchResponse,
     StatusResponse,
 )
+
+BEST_ALGORITHM: Final[str] = "best"
+"""Canonical algorithm name resolving to whichever scoring algorithm the
+server currently recommends. Stable across algorithm version bumps — pass
+``algorithm=BEST_ALGORITHM`` for forward-compatibility."""
 
 _HOSTED_HOSTS = ("api.opensanctions.org", "api.test.opensanctions.org")
 
@@ -255,3 +262,65 @@ class Client:
         return SearchResponse.model_validate(
             self._request("GET", f"/search/{quote(dataset, safe='')}", params=params)
         )
+
+    # ----- match -----
+
+    def match(
+        self,
+        entity: EntityInput,
+        *,
+        filters: MatchFilters | None = None,
+        threshold: float | None = None,
+        algorithm: str | None = None,
+        weights: dict[str, float] | None = None,
+        config: dict[str, Any] | None = None,
+        limit: int | None = None,
+        **filter_kwargs: Any,
+    ) -> MatchResponse:
+        """Query-by-example match against a dataset.
+
+        Constructs a single-query payload on the v1 wire (``queries={"q":
+        entity.to_payload()}``) and unwraps the response into a flat
+        ``MatchResponse``. The unwrap is the one structural difference from
+        v2's planned shape (§4.8): swap it out when ``/v2/match`` ships.
+
+        Pass filter fields either via ``filters=MatchFilters(...)`` or as
+        kwargs (``datasets=[...]``, ``topics=[...]``, ``exclude_entities=[...]``).
+        Kwargs win over a passed-in filters object on the fields they specify.
+
+        ``algorithm`` is a string — common values are ``"best"`` (the
+        canonical default; ``BEST_ALGORITHM`` exposed at module level),
+        ``"logic-v2"``, ``"name-matcher"``. The full set is dynamic and can
+        be retrieved via ``client.algorithms()``.
+        """
+        f = merge_filters(MatchFilters, filters, filter_kwargs)
+        dataset, params = serialise_match_filters(f)
+
+        if threshold is not None:
+            params["threshold"] = threshold
+        if algorithm is not None:
+            params["algorithm"] = algorithm
+        if limit is not None:
+            params["limit"] = limit
+
+        body: dict[str, Any] = {
+            "queries": {"q": entity.to_payload()},
+            "weights": weights or {},
+            "config": config or {},
+        }
+
+        raw = self._request("POST", f"/match/{quote(dataset, safe='')}", params=params, json=body)
+
+        return MatchResponse.model_validate(_unwrap_match_response(raw))
+
+
+def _unwrap_match_response(raw: dict[str, Any]) -> dict[str, Any]:
+    """Translate the v1 ``{responses: {q: {...}}, limit: N}`` envelope into
+    the v2-shaped flat ``{query, results, total, limit}`` MatchResponse takes."""
+    inner = raw["responses"]["q"]
+    return {
+        "query": inner["query"],
+        "results": inner["results"],
+        "total": inner["total"],
+        "limit": raw["limit"],
+    }

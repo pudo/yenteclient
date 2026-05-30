@@ -1,0 +1,26 @@
+{
+  "responses": {
+    "q": {
+      "status": 200,
+      "results": [
+        {
+          "id": "Q1",
+          "caption": "Close-but-not-quite",
+          "schema": "Person",
+          "properties": {"firstName": ["X"]},
+          "datasets": ["default"],
+          "target": false,
+          "score": 0.55,
+          "match": false,
+          "explanations": {}
+        }
+      ],
+      "total": {"value": 1, "relation": "eq"},
+      "query": {
+        "schema": "Person",
+        "properties": {"firstName": ["X"]}
+      }
+    }
+  },
+  "limit": 5
+}

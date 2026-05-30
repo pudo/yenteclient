@@ -1,0 +1,14 @@
+{
+  "responses": {
+    "q": {
+      "status": 200,
+      "results": [],
+      "total": {"value": 0, "relation": "eq"},
+      "query": {
+        "schema": "Person",
+        "properties": {"firstName": ["ZZZZZZ"]}
+      }
+    }
+  },
+  "limit": 5
+}

@@ -1,0 +1,40 @@
+{
+  "responses": {
+    "q": {
+      "status": 200,
+      "results": [
+        {
+          "id": "NK-aU5ybkbRFJucf8YMwsJvDw",
+          "caption": "Alexander Vyacheslavovich ZAKHAROV",
+          "schema": "Person",
+          "properties": {
+            "firstName": ["Aleksandr", "Alexander"],
+            "lastName": ["Zacharov"],
+            "topics": ["sanction"],
+            "country": ["ru"]
+          },
+          "datasets": ["us_ofac_sdn", "eu_fsf"],
+          "target": true,
+          "score": 0.92,
+          "match": true,
+          "explanations": {
+            "name_match": {
+              "score": 0.92,
+              "detail": "exact match on lastName",
+              "weight": 1.0
+            }
+          }
+        }
+      ],
+      "total": {"value": 1, "relation": "eq"},
+      "query": {
+        "schema": "Person",
+        "properties": {
+          "firstName": ["Aleksandr"],
+          "lastName": ["Zacharov"]
+        }
+      }
+    }
+  },
+  "limit": 5
+}
