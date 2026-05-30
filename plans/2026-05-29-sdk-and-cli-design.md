@@ -411,9 +411,6 @@ class Client:
         proxy: str | None = None,                    # singular per httpx 0.27+
         headers: dict[str, str] | None = None,       # merged onto every request
 
-        # Retry
-        retry: RetryPolicy | None = None,
-
         # Test seam
         transport: httpx.BaseTransport | None = None,
     ) -> None: ...
@@ -423,7 +420,7 @@ class Client:
 
 - **Transport:** `httpx.Client` / `AsyncClient` with `follow_redirects=True`. The `308` on `/entities/{referent}` → `/entities/{canonical}` is followed transparently.
 - **Timeout:** default `httpx.Timeout(30.0, connect=10.0)`; overridable via `timeout=`.
-- **Retries:** HTTP-level retries on 429, 502, 503, 504 with exponential backoff (base 0.5s, factor 2, max 4 attempts, max delay 16s, full jitter). Honors `Retry-After` on 429. Configurable via `retry=RetryPolicy(...)`. Connection-level retries stay at httpx's default.
+- **Retries:** **deferred past M2.** Transient failures (429, 5xx, network errors) bubble up as `APIError` / `TransportError` for users to handle. We'll add a `RetryPolicy` + `retry=` kwarg when there's a concrete need (probably alongside `match_many` / `match_iter` in M4, where it matters most). httpx's connection-level transport retries (`HTTPTransport(retries=2)`) stay on, so DNS / connection-refused failures already get a free retry.
 - **Auth header:** when `api_key` is set, attach `Authorization: ApiKey {key}` to every request. When missing and `base_url` points at `api.opensanctions.org`, emit `warnings.warn` once — not an exception (self-hosted setups don't need keys).
 - **User-Agent:** RFC-7231 bracket-comment form. The product is always `yente-client/{ver}`; caller's `app_name` and runtime versions sit in the parenthesised comment:
   - No `app_name`: `yente-client/0.0.1 (python/3.12.5; httpx/0.28.1)`
