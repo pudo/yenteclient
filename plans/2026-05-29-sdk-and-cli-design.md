@@ -12,7 +12,7 @@ Two client libraries and one CLI, in a single repo (`/home/pudo/code/yenteclient
 
 - **`python/`** — `yente-client` on PyPI. Sync + async, both backed by `httpx`. Powers the CLI.
 - **`typescript/`** — `@opensanctions/yente-client` on npm. ESM, native `fetch`.
-- **`python/yente_client/cli/`** — `yente` CLI, built on Typer, driving the Python SDK.
+- **`python/yente_client/cli/`** — `yente-client` CLI (binary name matches PyPI package), built on Typer, driving the Python SDK.
 
 Both SDKs target **the hosted API and self-hosted yente from one client surface**: `base_url` defaults to `https://api.opensanctions.org`; passing an `api_key` adds `Authorization: ApiKey <key>`; omitting it works against self-hosted yente.
 
@@ -28,14 +28,14 @@ From the live OpenAPI (`https://api.opensanctions.org/openapi.json`, yente 5.4.0
 
 | Endpoint (v1 wire) | SDK method | CLI |
 | --- | --- | --- |
-| `POST /match/{dataset}` (one query at a time, see §4.7) | `client.match(entity, **filters)` → `MatchResponse` | `yente match` |
-| same, looped client-side | `client.match_many(entities, workers=N)` → `list[MatchResponse]` | (consumed by `yente screen`) |
-| same, streaming | `client.match_iter(entity_iter, workers=N)` → `Iterator[(key, MatchResponse)]` | `yente screen` |
-| `GET /search/{dataset}` | `client.search(q, datasets=["default"], **opts)` → `SearchResponse` | `yente search` |
-| `GET /entities/{id}` | `client.fetch(id, nested=True)` → `Entity` | `yente fetch` |
-| `GET /entities/{id}/adjacent[/{prop}]` | `client.adjacent(id, prop=None, **paging)` | `yente fetch --adjacent` |
-| `GET /catalog` | `client.catalog()` | `yente catalog` |
-| `GET /algorithms` | `client.algorithms()` | `yente algorithms` |
+| `POST /match/{dataset}` (one query at a time, see §4.7) | `client.match(entity, **filters)` → `MatchResponse` | `yente-client match` |
+| same, looped client-side | `client.match_many(entities, workers=N)` → `list[MatchResponse]` | (consumed by `yente-client screen`) |
+| same, streaming | `client.match_iter(entity_iter, workers=N)` → `Iterator[(key, MatchResponse)]` | `yente-client screen` |
+| `GET /search/{dataset}` | `client.search(q, datasets=["default"], **opts)` → `SearchResponse` | `yente-client search` |
+| `GET /entities/{id}` | `client.fetch(id, nested=True)` → `Entity` | `yente-client fetch` |
+| `GET /entities/{id}/adjacent[/{prop}]` | `client.adjacent(id, prop=None, **paging)` | `yente-client fetch --adjacent` |
+| `GET /catalog` | `client.catalog()` | `yente-client catalog` |
+| `GET /algorithms` | `client.algorithms()` | `yente-client algorithms` |
 | `GET /healthz` / `GET /readyz` | `client.healthz()` / `client.readyz()` | (ops only, no CLI v1) |
 
 Deferred to a later iteration: `/reconcile/*`, `/statements`, `/updatez`.
@@ -77,7 +77,7 @@ yenteclient/
 │   │   │   └── _literals.py         # generated Schema / PropertyType / Topic / Gender Literal types
 │   │   ├── cli/
 │   │   │   ├── __init__.py
-│   │   │   ├── main.py              # `yente` entrypoint (Typer app)
+│   │   │   ├── main.py              # `yente-client` entrypoint (Typer app)
 │   │   │   ├── commands.py          # search, match, fetch, catalog, algorithms
 │   │   │   └── output.py            # json / table / jsonl formatters
 │   │   └── _version.py
@@ -513,7 +513,7 @@ Implementation:
 - **Errors:** by default a failed item raises and cancels in-flight work; with `on_error="collect"` errors are returned in-band as `MatchError(key=..., exception=...)` so a large run can continue.
 - **Rate limits:** the same `RetryPolicy` applies per call; a 429 with `Retry-After` pauses *that* worker, others continue.
 
-The threaded CSV CLI (`yente screen`, §5.5) is a thin shell around `match_iter` — same retry policy, same backpressure.
+The threaded CSV CLI (`yente-client screen`, §5.5) is a thin shell around `match_iter` — same retry policy, same backpressure.
 
 ### 4.8 v1 ↔ v2 translation map
 
@@ -537,7 +537,7 @@ The unwrap is the one structural asymmetry: v1 wraps the result in `responses["q
 ### 5.1 Commands (v1)
 
 ```
-yente search QUERY [--datasets default]                    # repeatable
+yente-client search QUERY [--datasets default]                    # repeatable
                    [--schema Thing]                        # entity-type filter
                    [--limit 10] [--offset 0]
                    [--topics sanction --topics role.pep]   # repeatable
@@ -545,7 +545,7 @@ yente search QUERY [--datasets default]                    # repeatable
                    [--filter properties.birthDate:1985]    # repeatable
                    [--format json|jsonl|table]
 
-yente match  --schema Person                               # entity type to construct
+yente-client match  --schema Person                               # entity type to construct
              [--first-name X] [--last-name Y] [--birth-date 1965]
              [--property name=Acme]                        # repeatable, schema-agnostic
              [--from-file query.json]                      # see format note below
@@ -557,21 +557,21 @@ yente match  --schema Person                               # entity type to cons
              [--exclude-schemata Address]                  # repeatable
              [--format json|table]
 
-yente fetch  ENTITY_ID
+yente-client fetch  ENTITY_ID
              [--nested/--no-nested]
              [--adjacent PROPERTY]                         # paginated adjacency
              [--limit 10] [--offset 0]
              [--format json|table]
 
-yente catalog    [--current-only] [--format json|table]
-yente algorithms [--format json|table]
+yente-client catalog    [--current-only] [--format json|table]
+yente-client algorithms [--format json|table]
 ```
 
 Notes:
 
 - `--datasets` (plural) is used by both `search` and `match`; the CLI translates the same way the SDK does (first → URL path param, rest → repeated `include_dataset` query params). See §4.8.
-- `--schema` is overloaded by context: on `yente search` it filters results by entity type; on `yente match` it specifies the type of entity being constructed from the other flags. Acceptable because each command has only one natural meaning for it.
-- `--from-file path.json` (for `yente match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the wire-format match query. The CLI looks up the schema name in the bundled model, constructs the matching per-schema class, and feeds it to `match()`. Flag-derived properties merge into / override the file's properties.
+- `--schema` is overloaded by context: on `yente-client search` it filters results by entity type; on `yente-client match` it specifies the type of entity being constructed from the other flags. Acceptable because each command has only one natural meaning for it.
+- `--from-file path.json` (for `yente-client match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the wire-format match query. The CLI looks up the schema name in the bundled model, constructs the matching per-schema class, and feeds it to `match()`. Flag-derived properties merge into / override the file's properties.
 - CLI flag names follow the v2 conventions (`--datasets`, `--exclude-entities`, `--exclude-schemata`). The translation to v1 is identical to the SDK's.
 
 ### 5.2 Config precedence
@@ -587,7 +587,7 @@ Notes:
 
 - **`--format json`** (default for piping) — single JSON document, matching the v2-flat shape (`{query, results, total, limit}` for `match`).
 - **`--format jsonl`** — one entity / hit per line. Useful for `jq` and the `screen` command.
-- **`--format table`** (default for TTY, auto-detected) — Rich table; columns for `match`: `score | id | caption | datasets | topics`. Truncates long captions; full record available via `yente fetch ID`.
+- **`--format table`** (default for TTY, auto-detected) — Rich table; columns for `match`: `score | id | caption | datasets | topics`. Truncates long captions; full record available via `yente-client fetch ID`.
 
 ### 5.4 Exit codes
 
@@ -597,12 +597,12 @@ Notes:
 - `3` — API error (non-2xx response).
 - `4` — transport error (network, timeout).
 
-The zero-results-as-1 convention is deliberate: it lets shell scripts use `yente match … && …` to gate on "we found something."
+The zero-results-as-1 convention is deliberate: it lets shell scripts use `yente-client match … && …` to gate on "we found something."
 
-### 5.5 v2 — `yente screen`
+### 5.5 v2 — `yente-client screen`
 
 ```
-yente screen INPUT.csv
+yente-client screen INPUT.csv
              --schema Person
              --map first_name:firstName --map last_name:lastName --map dob:birthDate
              [--id-col customer_id]                # used as the per-row key
@@ -669,7 +669,7 @@ Notes:
 5. **CLI v1** — `search`, `match`, `fetch`, `catalog`, `algorithms`. JSON / JSONL / table formatters. Config precedence + env var handling.
 6. **TypeScript SDK v1** — `Client` + models + errors + entities. Native fetch. zod-based response validation. Extends the regen pipeline with TS Jinja templates so both languages stay model-locked.
 7. **First publish** — PyPI + npm 0.1.0, README quickstarts, GitHub Actions release on tag.
-8. **`yente screen` CLI** — threaded CSV screening, resumable, on top of `match_iter`.
+8. **`yente-client screen` CLI** — threaded CSV screening, resumable, on top of `match_iter`.
 9. **Coverage gaps** — `/reconcile/*`, `/statements`, `/updatez`. Added as separate methods; no API redesign needed.
 10. **`/v2/match` cut-over** — when the server ships v2, rewrite the call layer in `_http.py` only. Public API unchanged; users get strict 400 errors and dataset DSL for free.
 
