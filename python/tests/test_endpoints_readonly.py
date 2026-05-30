@@ -1,7 +1,5 @@
 """Endpoint tests: healthz, readyz, catalog, algorithms, fetch, adjacent."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import httpx

@@ -1,7 +1,5 @@
 """Tests for client.match() — v2-shape over v1 wire, single-entity payload, unwrap."""
 
-from __future__ import annotations
-
 import json
 from collections.abc import Callable
 

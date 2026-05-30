@@ -5,14 +5,12 @@ that will change when ``/v2/match`` ships (per design doc §4.8). Keeping it
 isolated means swapping it doesn't ripple through the endpoint methods.
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from .filters import MatchFilters, SearchFilters, _CommonFilters
+from yente_client.filters import MatchFilters, SearchFilters, _CommonFilters
 
 FT = TypeVar("FT", bound=BaseModel)
 

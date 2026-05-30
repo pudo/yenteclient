@@ -8,8 +8,6 @@ Kept deliberately small — these are smoke tests, not a comprehensive suite.
 They double as a drift detector for the hosted API's response shapes.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from yente_client.entities import Person

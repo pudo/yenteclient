@@ -1,7 +1,5 @@
 """Tests for filter types: cross-endpoint rejection, alias round-trip, Literal validation."""
 
-from __future__ import annotations
-
 from datetime import datetime
 
 import pytest

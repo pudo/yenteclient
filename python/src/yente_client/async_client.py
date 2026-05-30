@@ -9,25 +9,23 @@ the streaming ``match_iter`` (M4) will return an ``AsyncIterator`` instead of
 an ``Iterator``. Method names and kwarg sets are unchanged.
 """
 
-from __future__ import annotations
-
 from types import TracebackType
 from typing import Any, Self, overload
 from urllib.parse import quote
 
 import httpx
 
-from ._http import prepare_http_kwargs, raise_for_response
-from ._translation import (
+from yente_client._http import prepare_http_kwargs, raise_for_response
+from yente_client._translation import (
     merge_filters,
     serialise_match_filters,
     serialise_search_filters,
     unwrap_match_response,
 )
-from .entities import EntityInput
-from .exceptions import TransportError
-from .filters import MatchFilters, SearchFilters
-from .models import (
+from yente_client.entities import EntityInput
+from yente_client.exceptions import TransportError
+from yente_client.filters import MatchFilters, SearchFilters
+from yente_client.models import (
     AdjacentPropertyResponse,
     AdjacentResponse,
     AlgorithmsResponse,

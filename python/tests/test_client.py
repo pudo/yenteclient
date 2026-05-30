@@ -1,7 +1,5 @@
 """Tests for the synchronous Client: constructor, User-Agent, error mapping."""
 
-from __future__ import annotations
-
 import re
 
 import httpx

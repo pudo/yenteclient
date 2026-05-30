@@ -1,7 +1,5 @@
 """Tests for the YenteError hierarchy."""
 
-from __future__ import annotations
-
 from yente_client.exceptions import (
     APIError,
     AuthenticationError,

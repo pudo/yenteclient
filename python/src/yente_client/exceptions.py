@@ -6,8 +6,6 @@ is raised separately for input-shape mistakes (unknown kwargs on a per-schema
 entity class, etc.) — see the design doc §4.5.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 

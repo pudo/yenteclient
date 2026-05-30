@@ -9,7 +9,7 @@ from typing import ClassVar, Literal
 
 from pydantic import Field, field_validator
 
-from ._base import _EntityBase, _coerce_property
+from yente_client.entities._base import _EntityBase, _coerce_property
 
 
 class Address(_EntityBase):

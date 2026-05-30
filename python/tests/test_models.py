@@ -1,7 +1,5 @@
 """Tests for response models — parsing, recursion, and convenience accessors."""
 
-from __future__ import annotations
-
 from datetime import datetime
 
 from yente_client.models import (

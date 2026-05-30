@@ -1,7 +1,5 @@
 """Tests for client.search() — filter merge + v1-wire translation + response shape."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
 
 import httpx

@@ -9,8 +9,6 @@ helpers do the actual work. What we DO verify here:
   - Error mapping fires identically through the async path
 """
 
-from __future__ import annotations
-
 import json
 from typing import Any
 

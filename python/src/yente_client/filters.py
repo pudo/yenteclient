@@ -11,13 +11,11 @@ means callers can write either ``schema=...`` (the alias) or
 ``schema_=...`` (the Python field name) and both work.
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .schemas._literals import Schema, Topic
+from yente_client.schemas._literals import Schema, Topic
 
 
 class _CommonFilters(BaseModel):

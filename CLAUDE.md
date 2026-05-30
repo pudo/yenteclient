@@ -1,0 +1,145 @@
+# yenteclient — project conventions
+
+Project-specific rules for working in this repo. The user's global
+`~/.claude/CLAUDE.md` still applies — these are extensions or explicit choices
+where this project deviates from defaults.
+
+## Python target
+
+- **Floor: Python 3.11.** Modern syntax is available natively; no compatibility
+  shims for older versions.
+- Develop on whatever's installed locally; CI matrix covers 3.11 / 3.12 / 3.13.
+
+## Imports
+
+- **Absolute imports only.** No `from .foo import bar` anywhere in the package.
+  Use `from yente_client.foo import bar`.
+- Standard `isort` grouping: stdlib → third-party → first-party. Ruff enforces.
+- Star imports are forbidden except in generated `__init__.py` files that
+  re-export per-schema entity classes — those have `# noqa: F401, F403`.
+
+## Typing
+
+- **Modern PEP 604 / 585 syntax**: `list[str]`, `dict[str, Any]`, `int | None`.
+  No imports from `typing` for those — use the builtins. `typing.Optional`,
+  `typing.Union`, `typing.List` etc. are not used.
+- `Final`, `Literal`, `TypeAlias`, `ClassVar`, `Self`, `overload` — fine to use
+  from `typing` when needed.
+- `mypy --strict` must pass on `src/yente_client/`. New code that adds
+  `# type: ignore` needs a code (`[attr-defined]` etc.) and a comment.
+- **Do not add `from __future__ import annotations`** unless you have a
+  concrete need (forward references, circular imports). Modern syntax works
+  natively at 3.11; adding the future import everywhere causes subtle issues
+  with Pydantic eval (we hit one in M2). If a file genuinely needs it, leave
+  a comment saying why.
+
+## Docstrings
+
+Hybrid: Google-style structure, project-style content. The user's global rule
+("lead with why, not how") wins on content; Google's sections give us a
+consistent shape.
+
+**Shape:**
+
+1. **Imperative one-line summary.** `"Fetch a single entity by ID."` — not
+   `"Fetches…"`.
+2. **Why / when paragraph** (optional). One paragraph max. Hidden constraints,
+   non-obvious motivation, "use this when…" guidance. Skip if the one-liner
+   covers it.
+3. **`Args:` / `Returns:` / `Raises:` sections** — *only when they add
+   information beyond what the type annotations show*. Don't write `args: x
+   (int): the x value` for a typed parameter; do write `Args:` when behaviour
+   depends on a flag value, or when an argument has constraints that aren't
+   in the type.
+
+Private functions (leading underscore) get a one-line docstring or none —
+spend effort on the public surface.
+
+## Naming
+
+- `snake_case` for functions, methods, variables, modules.
+- `PascalCase` for classes (including generated entity classes).
+- `SCREAMING_SNAKE_CASE` for module-level constants (`BEST_ALGORITHM`).
+- `_leading_underscore` for module-private (anything not exported).
+- Double-leading-underscore name-mangling: avoid.
+- **camelCase exception:** the per-schema entity classes (`Person`, `Company`)
+  carry their FtM properties as `camelCase` fields (`firstName`, `birthDate`)
+  to match the wire format. This is intentional and only applies to entity
+  input classes. All other naming is snake_case.
+
+## Errors
+
+- Every project-raised error inherits from `YenteError` (defined in
+  `yente_client.exceptions`).
+- `pydantic.ValidationError` is raised separately for input-shape mistakes; we
+  don't wrap or alias it.
+- Wrap external errors with `raise NewError(...) from exc` to preserve context.
+- Don't catch `Exception` broadly. Catch what you know how to handle.
+
+## Logging
+
+- **Stdlib `logging`** when M4+ work introduces logging.
+- Module-level logger: `log = logging.getLogger(__name__)` at the top of the
+  file (after imports).
+- The SDK should be quiet by default. Callers configure handlers / levels.
+- Don't log inside hot paths or per-request unless gated on debug level.
+
+## Custom exceptions
+
+- Defined in `yente_client/exceptions.py`.
+- `YenteError` is the only base class for client-raised errors.
+- Subclasses carry structured attributes (status_code, retry_after, etc.) in
+  addition to the message — caller can branch on type or read fields.
+
+## File / module layout
+
+- `src/yente_client/` package layout. Tests under `python/tests/` at the
+  repo root (not inside the package).
+- Public surface is re-exported from `yente_client/__init__.py`.
+- Generated files: `_generated.py` and `_literals.py` carry `# ruff: noqa` at
+  the top and are produced by `scripts/regen_model.py`. Don't hand-edit.
+- Files can grow as long as they're cohesive. If `client.py` crosses 500
+  lines, consider splitting endpoints into a submodule. We're under that
+  ceiling today.
+
+## Tests
+
+- `pytest` with `asyncio_mode = "auto"` (configured in `pyproject.toml`).
+  `async def test_*` works without per-test decorators.
+- Fixtures live in `python/tests/conftest.py`. Shared: `load_fixture`,
+  `make_client`, `make_async_client`, `live_client`, `live_async_client`.
+- **`@pytest.mark.live`** for tests that hit a real yente; gated on
+  `OPENSANCTIONS_API_KEY`. Run locally via `pytest -m live`; CI splits them
+  into a separate job.
+- Mock HTTP via `httpx.MockTransport(handler)` passed through the `transport=`
+  kwarg on `Client` / `AsyncClient`. We don't use `respx` despite having it
+  installed.
+- Fixtures (JSON response bodies) live in **`testdata/` at the repo root**,
+  not in `python/tests/fixtures/` — shared with the future TS SDK.
+- Prefer separate test functions over `@pytest.mark.parametrize` when the
+  cases are conceptually different. Parametrize when you're varying one input
+  and the assertions are identical (e.g. `test_invalid_app_name_raises[bad]`).
+
+## Codegen
+
+- `scripts/regen_model.py` fetches the FtM model from
+  `data.opensanctions.org/meta/model.json`, writes `model/model.json`, copies
+  to the package, renders Jinja templates, and runs `ruff format` as a
+  postprocess.
+- Determinism rules: schemas alphabetical, properties alphabetical, JSON
+  written with `sort_keys=True`, compact separators, trailing newline.
+- CI runs `regen_model.py --check --skip-fetch` to detect drift between the
+  templates and the committed generated files.
+- **Never hand-edit generated files.** Update the template, run regen, commit.
+
+## Working in this repo
+
+- Project-local venv at `python/.venv/`. System Python 3.14 lacks
+  `ensurepip`, so we create it via `uv venv` and install via
+  `uv pip install --python python/.venv/bin/python -e python[dev]`.
+- `make setup` / `make regen-model` / `make regen-model-check` / `make test` /
+  `make lint`. CI runs the underlying commands directly.
+- `.env` at repo root (gitignored) carries `OPENSANCTIONS_API_KEY` and
+  `YENTE_BASE_URL`. Conftest loads it for local convenience.
+- Don't commit secrets. Don't push without explicit user direction (per the
+  global CLAUDE.md pacing rules).

@@ -4,8 +4,6 @@ Lives below the ``Client`` so the request layer stays small and the helpers
 are independently testable.
 """
 
-from __future__ import annotations
-
 import contextlib
 import re
 import sys
@@ -15,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from .exceptions import (
+from yente_client.exceptions import (
     APIError,
     AuthenticationError,
     BadRequestError,

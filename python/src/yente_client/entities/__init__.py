@@ -5,8 +5,8 @@ Source: model/model.json (commit-pinned FtM model snapshot).
 """
 
 # ruff: noqa
-from ._base import EntityInput, _EntityBase
-from ._generated import (
+from yente_client.entities._base import EntityInput, _EntityBase
+from yente_client.entities._generated import (
     Address,
     Airplane,
     Analyzable,
