@@ -7,6 +7,7 @@ The Typer app is configured here; the subcommands themselves live in
 
 from yente_client.cli._deps import typer
 from yente_client.cli.commands import register, version_command
+from yente_client.cli.config import _DEFAULT_BASE_URL, CliConfig
 
 app = typer.Typer(
     name="yente-client",
@@ -26,13 +27,49 @@ def _app_callback(
         help="Show client + bundled FtM model version and exit.",
         is_eager=True,
     ),
+    api_key: str | None = typer.Option(
+        None,
+        "--api-key",
+        envvar="OPENSANCTIONS_API_KEY",
+        show_envvar=True,
+        help="API key for the hosted OpenSanctions API. Falls back to env.",
+    ),
+    base_url: str = typer.Option(
+        _DEFAULT_BASE_URL,
+        "--base-url",
+        envvar="YENTE_BASE_URL",
+        show_envvar=True,
+        help="API root. Use to target a self-hosted yente instance.",
+    ),
+    app_name: str | None = typer.Option(
+        None,
+        "--app-name",
+        help="Identifier embedded in the User-Agent. Helpful for hosted-side telemetry.",
+    ),
+    user_agent: str | None = typer.Option(
+        None,
+        "--user-agent",
+        help="Full User-Agent override; bypasses app-name assembly.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show full tracebacks on errors instead of one-line summaries.",
+    ),
 ) -> None:
     """Global flags applied before any subcommand."""
     if show_version:
         version_command()
         raise typer.Exit()
+    ctx.obj = CliConfig(
+        api_key=api_key,
+        base_url=base_url,
+        app_name=app_name,
+        user_agent=user_agent,
+        verbose=verbose,
+    )
     if ctx.invoked_subcommand is None:
-        # No subcommand and no global-flag short-circuit: show help.
         typer.echo(ctx.get_help())
         raise typer.Exit()
 
