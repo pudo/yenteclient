@@ -1,0 +1,71 @@
+# Dependabot configuration.
+#
+# Three ecosystems watched:
+#  - pip (Python deps declared in python/pyproject.toml)
+#  - github-actions (the workflows themselves)
+#  - npm (TS SDK, lit so dependabot picks it up the moment M6 lands)
+#
+# Weekly cadence on Monday morning UTC. Dev/test/docs deps are grouped
+# so we get one PR per group instead of one per package — easier to
+# review and merge, since these rarely conflict with each other.
+
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /python
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    groups:
+      dev-deps:
+        applies-to: version-updates
+        patterns:
+          - pytest*
+          - ruff
+          - mypy
+          - respx
+          - jinja2
+          - python-dotenv
+      docs-deps:
+        applies-to: version-updates
+        patterns:
+          - mkdocs*
+          - mkdocstrings*
+      runtime-deps:
+        applies-to: version-updates
+        patterns:
+          - httpx
+          - pydantic*
+          - typer
+          - rich
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Etc/UTC
+    labels:
+      - dependencies
+      - ci
+
+  - package-ecosystem: npm
+    directory: /typescript
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Etc/UTC
+    labels:
+      - dependencies
+      - typescript
+    # The /typescript directory doesn't exist yet (M6). When it lands,
+    # this entry activates with no further config changes; until then
+    # dependabot just logs that the path is missing and skips it.
