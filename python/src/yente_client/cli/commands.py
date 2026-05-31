@@ -8,6 +8,7 @@ module's job is argument-parsing + output formatting.
 import contextlib
 import difflib
 import json
+import time
 from collections.abc import Iterator
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -17,7 +18,7 @@ from pydantic import ValidationError
 
 from yente_client import entities
 from yente_client.cli._deps import typer
-from yente_client.cli.config import _DEFAULT_BASE_URL, CliConfig
+from yente_client.cli.config import CliConfig
 from yente_client.cli.output import (
     Format,
     print_json,
@@ -33,7 +34,7 @@ from yente_client.exceptions import (
     TransportError,
     YenteError,
 )
-from yente_client.models import Entity
+from yente_client.models import Dataset, Entity
 from yente_client.schemas import has_schema, iter_properties, model
 
 _FORMAT_HELP = "Output format. `auto` (default) renders a table on a TTY and JSON when piped."
@@ -101,24 +102,7 @@ def _suggest_property(schema: str, prop_name: str) -> str | None:
     return matches[0] if matches else None
 
 
-# ----- version -----
-
-
-def version_command() -> None:
-    """Print the client version and the bundled FtM model identity.
-
-    Output includes the package version, the FtM model snapshot's ``run_time``
-    (so callers — including LLM agents — can reason about which schemas and
-    topics are available without poking around), and the default API target.
-    """
-    try:
-        client_version = version("yente-client")
-    except PackageNotFoundError:
-        client_version = "0.0.0+unknown"
-
-    typer.echo(f"yente-client {client_version}")
-    typer.echo(f"Bundled FtM model: {_read_model_snapshot_date()}")
-    typer.echo(f"Default API:       {_DEFAULT_BASE_URL}")
+# ----- shared helpers -----
 
 
 def _read_model_snapshot_date() -> str:
@@ -130,6 +114,14 @@ def _read_model_snapshot_date() -> str:
         return "unknown"
     run_time = raw.get("run_time")
     return str(run_time) if run_time else "unknown"
+
+
+def _client_version() -> str:
+    """Resolve the installed ``yente-client`` version, with a fallback."""
+    try:
+        return version("yente-client")
+    except PackageNotFoundError:
+        return "0.0.0+unknown"
 
 
 # ----- health probes -----
@@ -153,20 +145,171 @@ def healthz_command(
         typer.echo(result.status)
 
 
-def readyz_command(
+# ----- status (the catch-all "is everything wired up?" view) -----
+
+
+def status_command(
     ctx: typer.Context,
     format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
 ) -> None:
-    """Probe whether the search index is ready to serve queries.
+    """Show the client setup and live server state at a glance.
 
-    Returns 503 (mapped to a ``ServerError`` exit) until the index has loaded.
+    Reports the installed ``yente-client`` version, the bundled FtM model
+    snapshot, the API URL, the masked API key, both liveness and readiness
+    probes (with timing), and the catalog's top-level collections (the
+    groupings users pass to ``-d`` / ``--datasets``).
+
+    Use this as the canonical "is everything set up correctly?" command. With
+    ``-f json`` the output is parser-friendly for LLM agents.
     """
-    with _with_client(ctx) as client:
-        result = client.readyz()
-    if resolve_format(format_) in (Format.JSON, Format.JSONL):
-        print_json(result)
+    config: CliConfig = ctx.obj
+    summary = _gather_status(config)
+
+    fmt = resolve_format(format_)
+    if fmt in (Format.JSON, Format.JSONL):
+        print_json(summary)
     else:
-        typer.echo(result.status)
+        _render_status_table(summary)
+
+
+def _gather_status(config: CliConfig) -> dict[str, Any]:
+    """Probe the server, fetch the catalog, and assemble the summary dict.
+
+    Probe failures don't raise — they're reported as ``status="error"`` in
+    the relevant field so ``status`` still produces a useful diagnostic when
+    the server is partially up.
+    """
+    suffix = config.api_key[-4:] if config.api_key and len(config.api_key) >= 4 else None
+
+    liveness: dict[str, Any] = {"status": "error", "detail": "client not built"}
+    readiness: dict[str, Any] = {"status": "error", "detail": "client not built"}
+    collections: list[Dataset] = []
+    catalog_error: str | None = None
+
+    try:
+        with config.make_client() as client:
+            liveness = _timed_probe(client, "/healthz")
+            readiness = _timed_probe(client, "/readyz")
+            try:
+                catalog = client.catalog()
+                collections = [d for d in catalog.datasets if d.children]
+            except YenteError as exc:
+                catalog_error = _format_error(exc)
+    except YenteError as exc:
+        # The Client itself couldn't even be used (transport error before any
+        # request reaches the server). Fall through with the empty defaults.
+        catalog_error = _format_error(exc)
+        liveness = _err_dict(exc)
+        readiness = _err_dict(exc)
+
+    current = sum(1 for d in collections if d.index_current)
+    stale = len(collections) - current
+
+    summary: dict[str, Any] = {
+        "client": {
+            "version": _client_version(),
+            "model_snapshot": _read_model_snapshot_date(),
+        },
+        "api": {
+            "url": config.base_url,
+            "auth": {"present": bool(suffix), "key_suffix": suffix},
+            "liveness": liveness,
+            "readiness": readiness,
+        },
+        "collections": [
+            {
+                "name": d.name,
+                "title": d.title,
+                "version": d.version,
+                "current": bool(d.index_current),
+            }
+            for d in collections
+        ],
+        "summary": {"total": len(collections), "current": current, "stale": stale},
+    }
+    if catalog_error is not None:
+        summary["catalog_error"] = catalog_error
+    return summary
+
+
+def _timed_probe(client: Client, path: str) -> dict[str, Any]:
+    """Time a GET to ``path``; return ``{status, elapsed_ms}`` or an error dict."""
+    start = time.monotonic()
+    try:
+        result = client._request("GET", path)
+        elapsed_ms = round((time.monotonic() - start) * 1000)
+        status = result.get("status", "ok") if isinstance(result, dict) else "ok"
+        return {"status": status, "elapsed_ms": elapsed_ms}
+    except YenteError as exc:
+        elapsed_ms = round((time.monotonic() - start) * 1000)
+        d = _err_dict(exc)
+        d["elapsed_ms"] = elapsed_ms
+        return d
+
+
+def _err_dict(exc: YenteError) -> dict[str, Any]:
+    if isinstance(exc, APIError):
+        return {"status": "error", "code": exc.status_code, "detail": exc.detail}
+    return {"status": "error", "error": type(exc).__name__, "detail": str(exc)}
+
+
+def _format_error(exc: YenteError) -> str:
+    if isinstance(exc, APIError):
+        return f"{type(exc).__name__} ({exc.status_code}): {exc.detail}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _render_status_table(summary: dict[str, Any]) -> None:
+    """Render the status summary in the TTY-friendly form."""
+    client_info = summary["client"]
+    api = summary["api"]
+    typer.echo(f"yente-client {client_info['version']}")
+    typer.echo(f"Bundled FtM model: {client_info['model_snapshot']}")
+    typer.echo("")
+    typer.echo(f"API:        {api['url']}")
+    auth = api["auth"]
+    if auth["present"]:
+        typer.echo(f"Auth:       ApiKey ···· {auth['key_suffix']}")
+    else:
+        typer.echo("Auth:       (no API key set — export OPENSANCTIONS_API_KEY)")
+    typer.echo(f"Liveness:   {_format_probe(api['liveness'])}")
+    typer.echo(f"Readiness:  {_format_probe(api['readiness'])}")
+    typer.echo("")
+
+    collections = summary["collections"]
+    if not collections:
+        if summary.get("catalog_error"):
+            typer.echo(f"Collections: (catalog unavailable — {summary['catalog_error']})")
+        else:
+            typer.echo("Collections: (none)")
+        return
+
+    rows = [
+        [
+            c["name"],
+            (c["title"] or "")[:50],
+            f"v={c['version'] or '-'}",
+            "current" if c["current"] else "STALE",
+        ]
+        for c in collections
+    ]
+    print_table(rows, headers=["name", "title", "version", "status"], title="Collections")
+    s = summary["summary"]
+    typer.echo(f"\n{s['total']} collections, {s['current']} current, {s['stale']} stale")
+
+
+def _format_probe(probe: dict[str, Any]) -> str:
+    """Format a probe result for the TTY view."""
+    status = probe.get("status", "?")
+    elapsed = probe.get("elapsed_ms")
+    if status == "ok":
+        return f"ok    ({elapsed} ms)" if elapsed is not None else "ok"
+    if status == "error":
+        code = probe.get("code")
+        detail = probe.get("detail", probe.get("error", "error"))
+        head = f"ERROR {code}" if code else "ERROR"
+        return f"{head} — {detail}"
+    return f"{status}    ({elapsed} ms)" if elapsed is not None else status
 
 
 # ----- catalog / algorithms -----
@@ -767,9 +910,8 @@ def _truncate(text: str, max_len: int) -> str:
 
 def register(app: typer.Typer) -> None:
     """Attach all subcommands to ``app``."""
-    app.command("version", help="Print client + bundled FtM model version.")(version_command)
+    app.command("status", epilog=_STATUS_EPILOG)(status_command)
     app.command("healthz", epilog=_HEALTHZ_EPILOG)(healthz_command)
-    app.command("readyz", epilog=_HEALTHZ_EPILOG)(readyz_command)
     app.command("catalog", epilog=_CATALOG_EPILOG)(catalog_command)
     app.command("algorithms", epilog=_ALGORITHMS_EPILOG)(algorithms_command)
     app.command("fetch", epilog=_FETCH_EPILOG)(fetch_command)
@@ -790,9 +932,34 @@ def register(app: typer.Typer) -> None:
 
 # ----- epilogs (worked examples + output shape notes for agent use) -----
 
+_STATUS_EPILOG = """\
+EXAMPLES:
+  yente-client status                          # TTY-friendly summary
+  yente-client status -f json                  # parseable summary for agents
+  yente-client status --base-url http://...    # check a self-hosted yente
+
+OUTPUT (with -f json):
+  {
+    "client": {"version": ..., "model_snapshot": ...},
+    "api": {
+      "url": ...,
+      "auth": {"present": bool, "key_suffix": "..." | null},
+      "liveness":  {"status": "ok" | "error", "elapsed_ms": int},
+      "readiness": {"status": "ok" | "error", "elapsed_ms": int}
+    },
+    "collections": [{"name", "title", "version", "current": bool}, ...],
+    "summary": {"total": int, "current": int, "stale": int}
+  }
+
+Use this as the first command when wiring up a new environment: it
+verifies the API key, base URL, liveness, readiness, and the
+collections you can pass to `-d`. Replaces the older `version` and
+`readyz` subcommands.
+"""
+
 _HEALTHZ_EPILOG = """\
-OUTPUT: a `{status: 'ok'}` object on success. The server returns 503
-(mapped to a ServerError exit, code 3) when the index isn't ready.
+OUTPUT: a `{status: 'ok'}` object on success. For a fuller view of
+the connection (auth, readiness, catalog), use `status`.
 """
 
 _CATALOG_EPILOG = """\

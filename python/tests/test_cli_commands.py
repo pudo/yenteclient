@@ -24,23 +24,7 @@ _BASE_URL = "http://test.local"
 _BASE_FLAGS = ["--api-key", "test", "--base-url", _BASE_URL]
 
 
-# ---------- version ----------
-
-
-def test_version_command(runner) -> None:
-    result = runner.invoke(app, ["version"])
-    assert result.exit_code == 0
-    assert "yente-client" in result.stdout
-    assert "Bundled FtM model" in result.stdout
-
-
-def test_top_level_version_flag(runner) -> None:
-    result = runner.invoke(app, ["--version"])
-    assert result.exit_code == 0
-    assert "yente-client" in result.stdout
-
-
-# ---------- healthz / readyz ----------
+# ---------- healthz ----------
 
 
 def test_healthz_table_output(runner, load_fixture) -> None:
@@ -60,12 +44,103 @@ def test_healthz_json_format(runner, load_fixture) -> None:
     assert parsed == {"status": "ok"}
 
 
-def test_readyz_command(runner, load_fixture) -> None:
+# ---------- status ----------
+
+
+def test_status_json(runner, load_fixture) -> None:
+    """status hits /healthz, /readyz, /catalog and assembles a summary dict."""
+    catalog_payload = load_fixture("catalog")
+    # Inject a `children` field on at least one dataset so the collections
+    # filter picks it up.
+    catalog_payload["datasets"][0]["children"] = ["us_ofac_sdn"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/healthz" or path == "/readyz":
+            return httpx.Response(200, json={"status": "ok"})
+        if path == "/catalog":
+            return httpx.Response(200, json=catalog_payload)
+        return httpx.Response(404, json={"detail": "not found"})
+
     with respx.mock(base_url=_BASE_URL) as mock:
-        mock.get("/readyz").mock(return_value=httpx.Response(200, json=load_fixture("status_ok")))
-        result = runner.invoke(app, [*_BASE_FLAGS, "readyz"])
+        mock.route().mock(side_effect=handler)
+        result = runner.invoke(app, [*_BASE_FLAGS, "status", "-f", "json"])
+    assert result.exit_code == 0, result.stdout + result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["client"]["version"]
+    assert summary["api"]["url"] == _BASE_URL
+    assert summary["api"]["auth"] == {"present": True, "key_suffix": "test"}
+    assert summary["api"]["liveness"]["status"] == "ok"
+    assert summary["api"]["readiness"]["status"] == "ok"
+    # At least one collection (the one we injected children on).
+    assert summary["summary"]["total"] >= 1
+
+
+def test_status_table(runner, load_fixture) -> None:
+    catalog_payload = load_fixture("catalog")
+    catalog_payload["datasets"][0]["children"] = ["us_ofac_sdn"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/healthz" or path == "/readyz":
+            return httpx.Response(200, json={"status": "ok"})
+        if path == "/catalog":
+            return httpx.Response(200, json=catalog_payload)
+        return httpx.Response(404, json={"detail": "not found"})
+
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.route().mock(side_effect=handler)
+        result = runner.invoke(app, [*_BASE_FLAGS, "status", "-f", "table"])
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "yente-client" in result.stdout
+    assert "Liveness" in result.stdout
+    assert "Readiness" in result.stdout
+    # Last 4 of "test" → "test" (the whole key, since len == 4)
+    assert "test" in result.stdout
+    assert "Collections" in result.stdout
+
+
+def test_status_masks_api_key(runner, load_fixture) -> None:
+    catalog_payload = load_fixture("catalog")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path in ("/healthz", "/readyz"):
+            return httpx.Response(200, json={"status": "ok"})
+        return httpx.Response(200, json=catalog_payload)
+
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.route().mock(side_effect=handler)
+        result = runner.invoke(
+            app,
+            ["--api-key", "sk-supersecret-9e95", "--base-url", _BASE_URL, "status", "-f", "json"],
+        )
     assert result.exit_code == 0
-    assert "ok" in result.stdout
+    summary = json.loads(result.stdout)
+    # Full key must never appear in the output.
+    assert "sk-supersecret-9e95" not in result.stdout
+    # Last 4 only.
+    assert summary["api"]["auth"] == {"present": True, "key_suffix": "9e95"}
+
+
+def test_status_handles_readyz_failure(runner, load_fixture) -> None:
+    """A failing /readyz should not crash status — it just reports the error."""
+    catalog_payload = load_fixture("catalog")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/healthz":
+            return httpx.Response(200, json={"status": "ok"})
+        if request.url.path == "/readyz":
+            return httpx.Response(503, json={"detail": "index not ready"})
+        return httpx.Response(200, json=catalog_payload)
+
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.route().mock(side_effect=handler)
+        result = runner.invoke(app, [*_BASE_FLAGS, "status", "-f", "json"])
+    assert result.exit_code == 0  # status itself succeeds even if readyz is unhealthy
+    summary = json.loads(result.stdout)
+    assert summary["api"]["liveness"]["status"] == "ok"
+    assert summary["api"]["readiness"]["status"] == "error"
+    assert summary["api"]["readiness"]["code"] == 503
 
 
 # ---------- catalog ----------

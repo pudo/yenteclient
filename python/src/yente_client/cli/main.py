@@ -6,7 +6,7 @@ The Typer app is configured here; the subcommands themselves live in
 """
 
 from yente_client.cli._deps import typer
-from yente_client.cli.commands import register, version_command
+from yente_client.cli.commands import register
 from yente_client.cli.config import _DEFAULT_BASE_URL, CliConfig
 
 app = typer.Typer(
@@ -40,12 +40,6 @@ app = typer.Typer(
 @app.callback(invoke_without_command=True)
 def _app_callback(
     ctx: typer.Context,
-    show_version: bool = typer.Option(
-        False,
-        "--version",
-        help="Show client + bundled FtM model version and exit.",
-        is_eager=True,
-    ),
     api_key: str | None = typer.Option(
         None,
         "--api-key",
@@ -78,9 +72,6 @@ def _app_callback(
     ),
 ) -> None:
     """Global flags applied before any subcommand."""
-    if show_version:
-        version_command()
-        raise typer.Exit()
     ctx.obj = CliConfig(
         api_key=api_key,
         base_url=base_url,

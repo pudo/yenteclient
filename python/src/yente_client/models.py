@@ -181,6 +181,11 @@ class Dataset(BaseModel):
 
     Mirrors a subset of yente's ``YenteDatasetModel`` — the fields most
     callers actually use. Unknown fields are dropped via ``extra="ignore"``.
+
+    ``children`` is non-empty when the dataset is a *collection* — a grouping
+    that aggregates other datasets. Use ``[d for d in catalog.datasets if
+    d.children]`` to pick out the named risk groupings (``sanctions``,
+    ``peps``, ``crime``, …) you'd pass to ``-d`` / ``--datasets``.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -191,6 +196,7 @@ class Dataset(BaseModel):
     version: str | None = None
     entities_url: str | None = None
     index_current: bool | None = None
+    children: list[str] = Field(default_factory=list)
 
 
 class CatalogResponse(BaseModel):
