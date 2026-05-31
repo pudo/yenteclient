@@ -8,8 +8,11 @@ module's job is argument-parsing + output formatting.
 import json
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from pydantic import ValidationError
+
+from yente_client import entities
 from yente_client.cli._deps import typer
 from yente_client.cli.config import _DEFAULT_BASE_URL, CliConfig
 from yente_client.cli.output import (
@@ -19,6 +22,7 @@ from yente_client.cli.output import (
     print_table,
     resolve_format,
 )
+from yente_client.entities import EntityInput
 from yente_client.models import Entity
 
 _FORMAT_HELP = "Output format. `auto` (default) renders a table on a TTY and JSON when piped."
@@ -311,6 +315,173 @@ def _print_entity_summary(entity: Entity) -> None:
     print_table(rows, headers=["field", "value"], title=entity.caption)
 
 
+# ----- match -----
+
+
+def match_command(
+    ctx: typer.Context,
+    schema: str = typer.Option(
+        ...,
+        "--schema",
+        "-s",
+        help="FtM schema name (Person, Company, Vessel, ...). Run `ref schemas --matchable`.",
+    ),
+    properties: list[str] | None = typer.Option(
+        None,
+        "--property",
+        "-p",
+        help=(
+            "Set a property, repeatable: `-p firstName=Aleksandr -p lastName=Zacharov`. "
+            "Same key passed twice produces a multi-value property. "
+            "Names are FtM camelCase (e.g. `birthDate`, not `birth_date`)."
+        ),
+    ),
+    from_file: Path | None = typer.Option(
+        None,
+        "--from-file",
+        "-i",
+        help='JSON file with shape {"schema": "...", "properties": {...}}. '
+        "`-s` and `-p` flags override values from the file.",
+    ),
+    datasets: list[str] | None = typer.Option(
+        None, "--datasets", "-d", help="Restrict to dataset(s). Repeatable."
+    ),
+    topics: list[str] | None = typer.Option(
+        None, "--topics", "-t", help="Topic filter. Repeatable."
+    ),
+    threshold: float | None = typer.Option(
+        None, "--threshold", help="Score threshold for the match flag (server default 0.70)."
+    ),
+    algorithm: str | None = typer.Option(
+        None,
+        "--algorithm",
+        "-a",
+        help='Scoring algorithm. "best" is stable across versions; see `algorithms`.',
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", "-l", help="Max results per query (server default 5)."
+    ),
+    changed_since: str | None = typer.Option(
+        None,
+        "--changed-since",
+        help="Only match entities updated since this ISO 8601 date.",
+    ),
+    exclude_entities: list[str] | None = typer.Option(
+        None, "--exclude-entities", help="Exclude these entity IDs from results. Repeatable."
+    ),
+    exclude_schemata: list[str] | None = typer.Option(
+        None, "--exclude-schemata", help="Exclude these schemas from results. Repeatable."
+    ),
+    format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
+) -> None:
+    """Match a single entity (built from `-p` flags or `--from-file`) against a dataset.
+
+    Use `search` instead for free-text discovery by name; `match` scores a
+    fully-described entity against the dataset's risk lists.
+
+    Exits 1 if no results returned, so shell scripts can gate on
+    `yente-client match … && …`.
+    """
+    config: CliConfig = ctx.obj
+    entity = _build_entity_input(schema, properties or [], from_file)
+
+    match_kwargs: dict[str, Any] = {}
+    if datasets:
+        match_kwargs["datasets"] = datasets
+    if topics:
+        match_kwargs["topics"] = topics
+    if changed_since:
+        match_kwargs["changed_since"] = changed_since
+    if exclude_entities:
+        match_kwargs["exclude_entities"] = exclude_entities
+    if exclude_schemata:
+        match_kwargs["exclude_schemata"] = exclude_schemata
+
+    with config.make_client() as client:
+        response = client.match(
+            entity,
+            threshold=threshold,
+            algorithm=algorithm,
+            limit=limit,
+            **match_kwargs,
+        )
+
+    fmt = resolve_format(format_)
+    if fmt == Format.JSON:
+        print_json(response)
+    elif fmt == Format.JSONL:
+        print_jsonl(response.results)
+    else:
+        rows = [
+            [
+                f"{r.score:.2f}",
+                "✓" if r.match else "",
+                r.id,
+                r.caption,
+                r.schema_,
+                ", ".join(r.datasets[:3]),
+                ", ".join(t for t in r.properties.get("topics", []) if isinstance(t, str)),
+            ]
+            for r in response.results
+        ]
+        print_table(
+            rows,
+            headers=["score", "match", "id", "caption", "schema", "datasets", "topics"],
+            title=(
+                f"total={response.total.value}"
+                f"{'+' if response.total.relation == 'gte' else ''} "
+                f"threshold-passing={len(response.matches)}"
+            ),
+        )
+
+    if not response.results:
+        raise typer.Exit(code=1)
+
+
+def _build_entity_input(schema: str, properties: list[str], from_file: Path | None) -> EntityInput:
+    """Construct a per-schema entity from CLI inputs.
+
+    Properties from ``--from-file`` are loaded first; ``-p KEY=VALUE`` flags
+    are then layered on top (later wins on first set, same-key repeats append).
+    The resulting dict is passed to the per-schema class — Pydantic enforces
+    property-name validity via ``extra="forbid"``.
+    """
+    schema_cls = getattr(entities, schema, None)
+    if schema_cls is None or not isinstance(schema_cls, type):
+        typer.echo(
+            f"error: Unknown schema {schema!r}. Run `yente-client ref schemas` for the list.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    props: dict[str, list[str]] = {}
+    if from_file is not None:
+        try:
+            raw: dict[str, Any] = json.loads(from_file.read_text())
+        except (OSError, ValueError) as exc:
+            typer.echo(f"error: could not read {from_file}: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+        file_props = raw.get("properties") or {}
+        for key, value in file_props.items():
+            props[key] = value if isinstance(value, list) else [value]
+
+    for spec in properties:
+        if "=" not in spec:
+            typer.echo(
+                f"error: --property must be KEY=VALUE; got {spec!r}",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        key, value = spec.split("=", 1)
+        props.setdefault(key, []).append(value)
+
+    try:
+        return cast(EntityInput, schema_cls(**props))
+    except ValidationError as exc:
+        typer.echo(f"error: invalid {schema} entity: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+
 # ----- registration -----
 
 
@@ -323,3 +494,4 @@ def register(app: typer.Typer) -> None:
     app.command("algorithms")(algorithms_command)
     app.command("fetch")(fetch_command)
     app.command("search")(search_command)
+    app.command("match")(match_command)

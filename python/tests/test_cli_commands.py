@@ -201,6 +201,170 @@ def test_search_passes_dataset_and_schema_filters(runner, load_fixture) -> None:
     assert seen[0].url.params.get_list("include_dataset") == ["us_ofac_sdn"]
 
 
+# ---------- match ----------
+
+
+def test_match_table(runner, load_fixture) -> None:
+    payload = load_fixture("match_high_score")
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.post(url__regex=r".*/match/.*").mock(return_value=httpx.Response(200, json=payload))
+        result = runner.invoke(
+            app,
+            [
+                *_BASE_FLAGS,
+                "match",
+                "-s",
+                "Person",
+                "-p",
+                "firstName=Aleksandr",
+                "-p",
+                "lastName=Zacharov",
+                "-d",
+                "sanctions",
+                "-f",
+                "table",
+            ],
+        )
+    assert result.exit_code == 0
+    assert "0.92" in result.stdout
+    assert "ZAKHAROV" in result.stdout
+
+
+def test_match_json(runner, load_fixture) -> None:
+    payload = load_fixture("match_high_score")
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.post(url__regex=r".*/match/.*").mock(return_value=httpx.Response(200, json=payload))
+        result = runner.invoke(
+            app,
+            [
+                *_BASE_FLAGS,
+                "match",
+                "-s",
+                "Person",
+                "-p",
+                "firstName=X",
+                "-d",
+                "sanctions",
+                "-f",
+                "json",
+            ],
+        )
+    assert result.exit_code == 0
+    parsed = json.loads(result.stdout)
+    assert "results" in parsed
+    assert parsed["results"][0]["score"] == 0.92
+
+
+def test_match_sends_correct_body(runner, load_fixture) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=load_fixture("match_zero_results"))
+
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.post(url__regex=r".*/match/.*").mock(side_effect=handler)
+        result = runner.invoke(
+            app,
+            [
+                *_BASE_FLAGS,
+                "match",
+                "-s",
+                "Person",
+                "-p",
+                "firstName=Aleksandr",
+                "-p",
+                "firstName=Alexander",  # multi-value (same key twice)
+                "-p",
+                "lastName=Zacharov",
+                "-d",
+                "sanctions",
+                "-a",
+                "best",
+                "-f",
+                "json",
+            ],
+        )
+    assert result.exit_code == 1  # empty results, but request shape verified
+    assert seen[0].method == "POST"
+    assert seen[0].url.path == "/match/sanctions"
+    assert seen[0].url.params.get("algorithm") == "best"
+    body = json.loads(seen[0].content)
+    assert body["queries"]["q"]["schema"] == "Person"
+    assert body["queries"]["q"]["properties"]["firstName"] == ["Aleksandr", "Alexander"]
+    assert body["queries"]["q"]["properties"]["lastName"] == ["Zacharov"]
+
+
+def test_match_unknown_schema_exits_two(runner) -> None:
+    result = runner.invoke(
+        app,
+        [*_BASE_FLAGS, "match", "-s", "NotARealSchema", "-p", "name=X"],
+    )
+    assert result.exit_code == 2
+    # respx not engaged because the error fires before any HTTP call.
+    assert "Unknown schema" in (result.stdout + result.stderr)
+
+
+def test_match_unknown_property_exits_two(runner) -> None:
+    result = runner.invoke(
+        app,
+        [*_BASE_FLAGS, "match", "-s", "Person", "-p", "not_a_real_prop=X"],
+    )
+    assert result.exit_code == 2
+    assert "invalid Person entity" in (result.stdout + result.stderr)
+
+
+def test_match_malformed_property_flag(runner) -> None:
+    result = runner.invoke(
+        app,
+        [*_BASE_FLAGS, "match", "-s", "Person", "-p", "no_equals_sign"],
+    )
+    assert result.exit_code == 2
+    assert "KEY=VALUE" in (result.stdout + result.stderr)
+
+
+def test_match_from_file_then_property_override(runner, load_fixture, tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=load_fixture("match_zero_results"))
+
+    query_file = tmp_path / "query.json"
+    query_file.write_text(
+        json.dumps(
+            {
+                "schema": "Person",
+                "properties": {"firstName": ["FromFile"], "birthDate": ["1965"]},
+            }
+        )
+    )
+
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.post(url__regex=r".*/match/.*").mock(side_effect=handler)
+        result = runner.invoke(
+            app,
+            [
+                *_BASE_FLAGS,
+                "match",
+                "-s",
+                "Person",
+                "-i",
+                str(query_file),
+                "-p",
+                "lastName=Override",
+                "-f",
+                "json",
+            ],
+        )
+    assert result.exit_code == 1
+    body = json.loads(seen[0].content)
+    props = body["queries"]["q"]["properties"]
+    assert props["firstName"] == ["FromFile"]  # from file
+    assert props["birthDate"] == ["1965"]  # from file
+    assert props["lastName"] == ["Override"]  # from -p
+
+
 def test_fetch_no_nested_flag(runner, load_fixture) -> None:
     captured: list[str] = []
     payload = load_fixture("entity_person")
