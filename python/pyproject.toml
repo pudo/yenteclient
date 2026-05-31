@@ -26,6 +26,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cli = [
+    "typer>=0.12",
+    "rich>=13",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
@@ -35,7 +39,14 @@ dev = [
     "mypy>=1.11",
     "jinja2>=3",
     "python-dotenv>=1.0",
+    # CLI deps so `make test` exercises the CLI test suite without a separate
+    # extra install. Mirrors yente-client[cli].
+    "typer>=0.12",
+    "rich>=13",
 ]
+
+[project.scripts]
+yente-client = "yente_client.cli.main:main"
 
 [project.urls]
 Homepage = "https://github.com/pudo/yenteclient"
