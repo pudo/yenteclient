@@ -336,7 +336,7 @@ __all__ = ["EntityInput", "_EntityBase", {% for name in schema_names %}"{{ name 
 
 **D3. Run regen, commit outputs.** First real run produces:
 
-- `_generated.py` — 69 classes, ~2.5–3k LoC after `ruff format`.
+- `_generated.py` — one class per FtM schema, ~2.5–3k LoC after `ruff format`.
 - `entities/__init__.py` — ~80 lines of re-exports.
 - `_literals.py` — ~5 lines (one Literal per type, each very long).
 
@@ -351,7 +351,7 @@ Commit all four (including the copy of `model.json` under `schemas/`).
 - `Person.schema_ == "Person"` and is `ClassVar`.
 - `isinstance(Person(name="X"), _EntityBase)` is `True`.
 - `Person(firstName="X").to_payload()` shape correct.
-- Sanity scan: `len(Schema.__args__) == 69` (from `_literals.py`).
+- Sanity scan: `len(Schema.__args__) > 30` and includes known anchors like `"Person"` / `"Company"` (from `_literals.py`). Don't lock in an exact count — that's drift-prone.
 - `from yente_client.entities import Person, Company` works.
 
 `tests/test_regen.py`:
@@ -460,7 +460,7 @@ I'll stop after each commit and surface state. Especially after commit 5 — tha
 
 These probably resolve naturally but worth flagging:
 
-1. **Class for non-matchable schemas?** ~22 of 69 schemas have `matchable: true`; the rest (Document, Article, Sanction, …) aren't intended as match query targets. Generate classes for all 69 for consistency? Or only the matchable ones? Lean: all 69 — the server is the gate, the client doesn't need to second-guess.
-2. **Top-level package re-exports.** Should `from yente_client import Person` work, or do users always go via `yente_client.entities`? Lean: both, but the top-level export adds 69 names to `yente_client.__init__.py`. Could be ergonomic or noisy. Decide when looking at the actual user surface.
+1. **Class for non-matchable schemas?** Only a subset of FtM schemas have `matchable: true`; the rest (Document, Article, Sanction, …) aren't intended as match query targets. Generate classes for all schemas for consistency, or only the matchable ones? Lean: all of them — the server is the gate, the client doesn't need to second-guess.
+2. **Top-level package re-exports.** Should `from yente_client import Person` work, or do users always go via `yente_client.entities`? Lean: both, but the top-level export adds one name per schema to `yente_client.__init__.py`. Could be ergonomic or noisy. Decide when looking at the actual user surface.
 3. **Property docstrings on generated fields.** `model.json` has `description` on most properties. Worth surfacing as a `# description here` comment line or as a `Field(description=...)`? Lean: `Field(description=...)` — shows up in IDE hover via Pydantic and in `model_json_schema()` if users ever generate docs.
 4. **`schemas/__init__.py` circularity.** `_lookup.py` imports `model` from `__init__.py`. Either lazy import inside each helper or have `_lookup.py` open `model.json` itself. Decide when writing.

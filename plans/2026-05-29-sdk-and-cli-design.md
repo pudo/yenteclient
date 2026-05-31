@@ -69,7 +69,7 @@ yenteclient/
 │   │   ├── entities/
 │   │   │   ├── __init__.py          # re-exports every schema class (regenerated)
 │   │   │   ├── _base.py             # _EntityBase, EntityInput TypeAlias, _ensure_list
-│   │   │   └── _generated.py        # 69 per-schema BaseModels; REGENERATED, do not edit by hand
+│   │   │   └── _generated.py        # per-schema BaseModels (one per FtM schema); REGENERATED, do not edit by hand
 │   │   ├── schemas/
 │   │   │   ├── __init__.py          # exposes the raw model dict + lookup helpers
 │   │   │   ├── _lookup.py           # has_schema, iter_properties, is_a, is_deprecated
@@ -180,8 +180,8 @@ We **do not** depend on `followthemoney` at runtime. The single authoritative so
 
 This is the same model the production stack and `yente` are pinned to, so client types cannot disagree with the server about what `Person.birthDate` is. It contains:
 
-- `model.schemata` — 69 schemas, each with `schemata` (full ancestor chain, already flattened), `extends`, `featured`, `required`, `caption`, `temporalExtent`, `matchable`, and per-property `{type, label, description, maxLength, range, deprecated}`.
-- `model.types` — 20 property types (`name`, `address`, `date`, `country`, `topic`, `gender`, …) with `matchable`, `group`, and enum `values` where applicable.
+- `model.schemata` — every FtM schema, each with `schemata` (full ancestor chain, already flattened), `extends`, `featured`, `required`, `caption`, `temporalExtent`, `matchable`, and per-property `{type, label, description, maxLength, range, deprecated}`.
+- `model.types` — FtM property types (`name`, `address`, `date`, `country`, `topic`, `gender`, …) with `matchable`, `group`, and enum `values` where applicable.
 - `target_topics` and `enrich_topics` — flat lists of topics that flag an entity as a screening target / enrichment candidate.
 
 A single canonical copy lives at **`model/model.json`** at the repo root, committed and refreshed via `make regen-model`.
@@ -262,7 +262,7 @@ is_deprecated("Person", "secondName")                               # True
 1. Fetch `https://data.opensanctions.org/meta/model.json`, write `model/model.json`.
 2. Copy to `python/src/yente_client/schemas/model.json` and `typescript/src/model.json`.
 3. Render `python/src/yente_client/entities/_generated.py` from `python_entities.py.j2`: one class per schema, properties flattened across `schemata`, deprecation markers preserved.
-4. Render `python/src/yente_client/schemas/_literals.py` from `python_literals.py.j2`: `Schema = Literal["Person", ...]`, `PropertyType = Literal[...]`, `Topic = Literal[...]` (full 71-value enum from `model.types["topic"].values`), `Gender = Literal[...]`.
+4. Render `python/src/yente_client/schemas/_literals.py` from `python_literals.py.j2`: `Schema = Literal["Person", ...]`, `PropertyType = Literal[...]`, `Topic = Literal[...]` (sourced from `model.types["topic"].values`), `Gender = Literal[...]`.
 5. Run `ruff format` on the Python output. (TypeScript codegen lands with the TS SDK milestone — see §9.)
 
 CI runs `python scripts/regen_model.py --check` and fails if any committed artefact differs from what the live model would generate. Upstream drift then surfaces as a normal PR review — release notes can call out additions, deprecations, removals.
@@ -564,6 +564,12 @@ yente-client fetch  ENTITY_ID
 
 yente-client catalog    [--current-only] [--format json|table]
 yente-client algorithms [--format json|table]
+
+yente-client ref schemas    [--matchable] [--format json|table]   # list every FtM schema
+yente-client ref schema NAME                  [--format json|table]   # detailed view: properties, types, deprecation, matchable flag
+yente-client ref topics     [--format json|table]   # the Topic enum + labels (sourced from model.types["topic"].values)
+yente-client ref types      [--format json|table]   # FtM property types (name, date, country, …)
+yente-client ref genders    [--format json|table]   # small Gender enum
 ```
 
 Notes:
@@ -573,6 +579,7 @@ Notes:
 - `--from-file path.json` (for `yente-client match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the wire-format match query. The CLI looks up the schema name in the bundled model, constructs the matching per-schema class, and feeds it to `match()`. Flag-derived properties (`-p KEY=VALUE`) merge into / override the file's properties.
 - `-p` / `--property KEY=VALUE` is the universal property setter on `match`. Repeatable; same key passed twice produces a multi-value property. No per-schema shortcuts (`--first-name` etc.) — the property name on the wire is always what you'd find in the FtM model (`firstName`, `birthDate`, …). Unknown property names fail at construction with a clear pydantic message.
 - The CLI extra `[cli]` pulls in Typer + Rich. Users who install `yente-client` without the extra and try to invoke the binary get a single-line error pointing them at `pip install yente-client[cli]` — see `yente_client.cli._deps` for the import-shim that emits it.
+- `ref` is purely offline — reads the bundled `model.json`, no network call, no API key needed. Useful for first-time discovery (run `ref schemas` before deciding what to `match` against) and for LLM agents inspecting what's queryable. Output with `-f json` is parser-friendly so an agent can fold it into its own context.
 
 **Short flags.** Long forms are always available; these get short aliases:
 
@@ -617,7 +624,61 @@ Notes:
 
 The zero-results-as-1 convention is deliberate: it lets shell scripts use `yente-client match … && …` to gate on "we found something."
 
-### 5.5 v2 — `yente-client screen`
+### 5.5 Agent-oriented help and discoverability
+
+A primary use-case for this CLI is **LLM coding agents that have never read the OpenSanctions docs**. The agent's first interaction is usually `yente-client --help`; everything they need to use the tool productively should flow from there. Concretely:
+
+**Top-level `yente-client --help`** carries a *workflow* block that maps user-intent to command:
+
+```
+WHICH COMMAND DO I WANT?
+  Have a full entity (name+dob+country)? → match
+  Have a name to look up?                → search
+  Have an ID already?                    → fetch
+  Not sure what's queryable?             → ref schemas
+  What datasets / algorithms exist?      → catalog, algorithms
+
+ENVIRONMENT:
+  OPENSANCTIONS_API_KEY  get one at https://opensanctions.org/account/
+  YENTE_BASE_URL         defaults to api.opensanctions.org
+```
+
+**Each command's `--help` carries an `EXAMPLES:` epilog** (Typer's `epilog=`) with 2–3 realistic invocations, plus a short **OUTPUT:** block describing the JSON shape when `-f json` is used. An agent reads this once and has a working mental model of inputs and outputs — without ever seeing the SDK docs.
+
+**`search` vs `match` disambiguation** appears in three places:
+
+- Top-level `--help` workflow block (above).
+- `search --help` opens with: "*Use* `match` *instead when you have a known entity to screen.*"
+- `match --help` opens with: "*Use* `search` *instead for free-text discovery by name.*"
+
+The repetition is intentional — agents may have grabbed only one command's help.
+
+**Error messages point to the next command.** Examples:
+
+| Trigger | Message |
+| --- | --- |
+| `match -s Persn …` | `Unknown schema 'Persn'. Run 'yente-client ref schemas' for the full list. Did you mean: Person?` |
+| `match -s Person -p birth_date=…` | `Property 'birth_date' not on Person. Run 'yente-client ref schema Person'. Did you mean: birthDate?` |
+| `match -s Document …` (non-matchable) | `Schema 'Document' is not matchable. Matchable schemas: Person, Company, Vessel, … (run 'yente-client ref schemas --matchable').` |
+| No API key + hosted URL | (existing warning) + `Get a key at https://opensanctions.org/account/` |
+
+Fuzzy suggestion uses a stdlib `difflib.get_close_matches` against the bundled `model.json` — no extra dep.
+
+**`yente-client --version`** outputs both the package version *and* the bundled FtM model identity so agents can reason about what's queryable:
+
+```
+yente-client 0.1.0
+Bundled FtM model: 2026-05-30
+Default API:       https://api.opensanctions.org
+```
+
+**Stable JSON output schemas in every command's help** under an `OUTPUT:` block. Documenting the shape in the help text — not just in the OpenAPI — means an agent doesn't have to either invoke-and-parse or read external specs to know what fields they get.
+
+**`ref schema NAME -f json`** emits an LLM-friendly summary of one schema (extends, featured, required, properties with types + matchable flag + deprecation). This is the "introspect-before-you-construct" path: agent runs `ref schema Person -f json`, has the property list, then constructs a valid `match` call.
+
+Deferred for after M4: `--help-json` per command (machine-readable help dumps), a top-level `examples` command (epilog covers it), `man` page generation.
+
+### 5.6 M7 — `yente-client screen`
 
 ```
 yente-client screen INPUT.csv

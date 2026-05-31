@@ -33,6 +33,25 @@ where this project deviates from defaults.
   with Pydantic eval (we hit one in M2). If a file genuinely needs it, leave
   a comment saying why.
 
+## Drift-prone facts
+
+Never bake specific counts from the bundled FtM model into docstrings,
+comments, plan docs, or `--help` output. **No** "69 schemas", "71 topics",
+"20 property types", "3 genders" etc. — these all change when upstream
+ships a new model snapshot and every reference becomes a small lie.
+
+Acceptable forms:
+
+- "every FtM schema" / "the full schema set"
+- "the Topic enum (sourced from `model.types["topic"].values`)"
+- "one class per FtM schema"
+- Anchors that the model can't break: specific class names (`Person`,
+  `Company`), specific topic strings (`"sanction"`, `"role.pep"`).
+
+If a test needs to assert against the bundled model, check membership of
+known anchors plus a sanity lower bound, never an exact count. The
+`regen_model.py --check` CI step is the authoritative drift detector.
+
 ## Docstrings
 
 Hybrid: Google-style structure, project-style content. The user's global rule

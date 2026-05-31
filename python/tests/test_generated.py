@@ -100,13 +100,14 @@ def test_to_payload_omits_unset_id() -> None:
     assert "id" not in p.to_payload()
 
 
-def test_schema_literal_count() -> None:
-    # 69 schemas in the bundled model — match across literals + entity classes.
+def test_schema_literal_includes_core_schemas() -> None:
+    # Don't lock in a specific count (FtM model evolves); check known anchors
+    # plus a sanity lower bound. `regen_model.py --check` enforces actual drift.
     args = Schema.__args__  # type: ignore[attr-defined]
-    assert len(args) == 69
     assert "Person" in args
     assert "Company" in args
     assert "Email" in args
+    assert len(args) > 30
 
 
 def test_topic_literal_includes_sanction() -> None:
