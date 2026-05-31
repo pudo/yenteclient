@@ -1,0 +1,36 @@
+name: nightly
+
+on:
+  schedule:
+    # 04:00 UTC daily — off-peak, picks up overnight API regressions
+    # before the next workday in any timezone.
+    - cron: "0 4 * * *"
+  # Manual fire-and-forget for ad-hoc verification.
+  workflow_dispatch:
+
+# Avoid stacking runs if the previous nightly is still in flight.
+concurrency:
+  group: nightly-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  live-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package + dev dependencies
+        run: pip install -e python/.[dev]
+
+      - name: pytest -m live (against the test API)
+        working-directory: python
+        env:
+          OPENSANCTIONS_API_KEY: ${{ secrets.OPENSANCTIONS_API_KEY }}
+          YENTE_BASE_URL: ${{ secrets.YENTE_BASE_URL }}
+        run: pytest -m live -v
