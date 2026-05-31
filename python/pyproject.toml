@@ -48,6 +48,10 @@ dev = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.26",
+    # Version bumper. Mirrors the toolchain in ../yente (and pinned to the
+    # same release for cross-repo muscle memory). Run from the repo root:
+    #     bump2version --verbose minor   # or patch / major
+    "bump2version == 1.0.1",
 ]
 
 [project.scripts]
