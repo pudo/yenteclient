@@ -156,8 +156,10 @@ def status_command(
 
     Reports the installed ``yente-client`` version, the bundled FtM model
     snapshot, the API URL, the masked API key, both liveness and readiness
-    probes (with timing), and the catalog's top-level collections (the
-    groupings users pass to ``-d`` / ``--datasets``).
+    probes (with timing), and the datasets the server has actually loaded
+    (``load: true`` entries in the catalog — typically one or two top-level
+    datasets / collections; their members ride along in the index without
+    independent freshness).
 
     Use this as the canonical "is everything set up correctly?" command. With
     ``-f json`` the output is parser-friendly for LLM agents.
@@ -183,7 +185,7 @@ def _gather_status(config: CliConfig) -> dict[str, Any]:
 
     liveness: dict[str, Any] = {"status": "error", "detail": "client not built"}
     readiness: dict[str, Any] = {"status": "error", "detail": "client not built"}
-    collections: list[Dataset] = []
+    loaded: list[Dataset] = []
     catalog_error: str | None = None
 
     try:
@@ -192,7 +194,7 @@ def _gather_status(config: CliConfig) -> dict[str, Any]:
             readiness = _timed_probe(client, "/readyz")
             try:
                 catalog = client.catalog()
-                collections = [d for d in catalog.datasets if d.children]
+                loaded = [d for d in catalog.datasets if d.load]
             except YenteError as exc:
                 catalog_error = _format_error(exc)
     except YenteError as exc:
@@ -202,8 +204,8 @@ def _gather_status(config: CliConfig) -> dict[str, Any]:
         liveness = _err_dict(exc)
         readiness = _err_dict(exc)
 
-    current = sum(1 for d in collections if d.index_current)
-    stale = len(collections) - current
+    current = sum(1 for d in loaded if d.index_current)
+    stale = len(loaded) - current
 
     summary: dict[str, Any] = {
         "client": {
@@ -216,16 +218,18 @@ def _gather_status(config: CliConfig) -> dict[str, Any]:
             "liveness": liveness,
             "readiness": readiness,
         },
-        "collections": [
+        "loaded": [
             {
                 "name": d.name,
                 "title": d.title,
                 "version": d.version,
+                "index_version": d.index_version,
                 "current": bool(d.index_current),
+                "is_collection": bool(d.children),
             }
-            for d in collections
+            for d in loaded
         ],
-        "summary": {"total": len(collections), "current": current, "stale": stale},
+        "summary": {"total": len(loaded), "current": current, "stale": stale},
     }
     if catalog_error is not None:
         summary["catalog_error"] = catalog_error
@@ -276,26 +280,26 @@ def _render_status_table(summary: dict[str, Any]) -> None:
     typer.echo(f"Readiness:  {_format_probe(api['readiness'])}")
     typer.echo("")
 
-    collections = summary["collections"]
-    if not collections:
+    loaded = summary["loaded"]
+    if not loaded:
         if summary.get("catalog_error"):
-            typer.echo(f"Collections: (catalog unavailable — {summary['catalog_error']})")
+            typer.echo(f"Loaded: (catalog unavailable — {summary['catalog_error']})")
         else:
-            typer.echo("Collections: (none)")
+            typer.echo("Loaded: (none — server has no datasets with load=true)")
         return
 
     rows = [
         [
-            c["name"],
-            (c["title"] or "")[:50],
-            f"v={c['version'] or '-'}",
-            "current" if c["current"] else "STALE",
+            d["name"],
+            (d["title"] or "")[:50],
+            f"v={d['version'] or '-'}",
+            "current" if d["current"] else "STALE",
         ]
-        for c in collections
+        for d in loaded
     ]
-    print_table(rows, headers=["name", "title", "version", "status"], title="Collections")
+    print_table(rows, headers=["name", "title", "version", "status"], title="Loaded datasets")
     s = summary["summary"]
-    typer.echo(f"\n{s['total']} collections, {s['current']} current, {s['stale']} stale")
+    typer.echo(f"\n{s['total']} loaded, {s['current']} current, {s['stale']} stale")
 
 
 def _format_probe(probe: dict[str, Any]) -> str:
@@ -947,14 +951,20 @@ OUTPUT (with -f json):
       "liveness":  {"status": "ok" | "error", "elapsed_ms": int},
       "readiness": {"status": "ok" | "error", "elapsed_ms": int}
     },
-    "collections": [{"name", "title", "version", "current": bool}, ...],
+    "loaded": [
+      {"name", "title", "version", "index_version",
+       "current": bool, "is_collection": bool}, ...
+    ],
     "summary": {"total": int, "current": int, "stale": int}
   }
 
 Use this as the first command when wiring up a new environment: it
-verifies the API key, base URL, liveness, readiness, and the
-collections you can pass to `-d`. Replaces the older `version` and
-`readyz` subcommands.
+verifies the API key, base URL, liveness, readiness, and what
+datasets the server is actually indexing. Replaces the older
+`version` and `readyz` subcommands.
+
+The full catalog (every dataset visible to the server, loaded or
+not) is available via `yente-client catalog`.
 """
 
 _HEALTHZ_EPILOG = """\

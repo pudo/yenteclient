@@ -108,7 +108,7 @@ yente-client ref topics                    # the Topic enum
 yente-client ref countries                 # ISO country codes the server speaks
 
 # Discover server state:
-yente-client status                        # client + server + auth + top-level collections
+yente-client status                        # client + server + auth + loaded datasets
 yente-client catalog                       # full per-source dataset list
 yente-client algorithms                    # enabled algorithms, default + best
 ```

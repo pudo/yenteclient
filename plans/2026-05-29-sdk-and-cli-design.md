@@ -570,7 +570,7 @@ yente-client ref schema NAME                  [--format json|table]   # detailed
 yente-client ref topics     [--format json|table]   # the Topic enum + labels (sourced from model.types["topic"].values)
 yente-client ref countries  [--format json|table]   # the country code → label lookup
 
-yente-client status         [--format json|table]   # client + server + catalog summary (see §5.7)
+yente-client status         [--format json|table]   # client + server + loaded datasets (see §5.6)
 yente-client healthz        [--format json|table]   # liveness probe only
 ```
 
@@ -674,7 +674,7 @@ Deferred for after M4: `--help-json` per command (machine-readable help dumps), 
 
 ### 5.6 `yente-client status`
 
-The `status` command consolidates everything you'd want to confirm at the start of a session — what client is installed, what server it's pointing at, whether that server is healthy, and what collections are queryable. Replaces the separate `version` / `readyz` commands and the top-level `--version` flag.
+The `status` command consolidates everything you'd want to confirm at the start of a session — what client is installed, what server it's pointing at, whether that server is healthy, and what datasets it has actually indexed. Replaces the separate `version` / `readyz` commands and the top-level `--version` flag.
 
 ```
 yente-client 0.1.0
@@ -685,18 +685,17 @@ Auth:       ApiKey ···· 1e95
 Liveness:   ok    (32 ms)
 Readiness:  ok    (19 ms)
 
-Collections:
-  sanctions   Consolidated Sanctions   v=20260531074701-liy   current
-  peps        Politically Exposed …    v=20260530152701-kxs   STALE
-  …
+Loaded datasets:
+  default   OpenSanctions Default   v=20260531081218-jen   current
 
-15 collections, 1 current, 14 stale
+1 loaded, 1 current, 0 stale
 ```
 
 Notes:
-- API key is masked to the last 4 characters (never the full value in JSON output either).
+- The "Loaded datasets" section filters the catalog to entries where `load: true`. A yente server typically loads one or two top-level datasets (often a collection like `default`); its members ride along in the same index and have no independent freshness state, so listing them here would be misleading. The full catalog is one `yente-client catalog` away.
+- "current" / "STALE" reflects the loaded dataset's `index_current` flag — does the running index match the latest exported version?
+- API key is masked to the last 4 characters (never the full value, including in JSON output).
 - A failing `/readyz` is reported as an error row but doesn't abort the command — the catalog fetch still runs.
-- "Collections" filters the catalog to datasets where `len(children) > 0` (the parent groupings: `sanctions`, `peps`, `crime`, `all`, …). The full per-source list is still available via `yente-client catalog`.
 - All three probes (`/healthz`, `/readyz`, `/catalog`) share one `Client` instance so they reuse the same HTTP connection.
 
 ### 5.7 M7 — `yente-client screen`

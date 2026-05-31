@@ -182,10 +182,15 @@ class Dataset(BaseModel):
     Mirrors a subset of yente's ``YenteDatasetModel`` — the fields most
     callers actually use. Unknown fields are dropped via ``extra="ignore"``.
 
+    ``load`` is ``True`` on the dataset(s) yente has actually indexed (1 to N
+    per server). Every other catalog entry rides along as metadata —
+    collection definitions, source-level descriptors for the indexed
+    collection's children, etc. ``index_current`` / ``index_version`` only
+    carry meaningful freshness when ``load`` is true; on metadata-only
+    entries they reflect upstream state, not what's queryable here.
+
     ``children`` is non-empty when the dataset is a *collection* — a grouping
-    that aggregates other datasets. Use ``[d for d in catalog.datasets if
-    d.children]`` to pick out the named risk groupings (``sanctions``,
-    ``peps``, ``crime``, …) you'd pass to ``-d`` / ``--datasets``.
+    that aggregates other datasets.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -195,7 +200,9 @@ class Dataset(BaseModel):
     description: str | None = None
     version: str | None = None
     entities_url: str | None = None
+    load: bool = False
     index_current: bool | None = None
+    index_version: str | None = None
     children: list[str] = Field(default_factory=list)
 
 

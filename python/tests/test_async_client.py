@@ -76,7 +76,7 @@ async def test_async_catalog(make_async_client, load_fixture) -> None:
     async with make_async_client(handler=_fixed(load_fixture("catalog"))) as c:
         r = await c.catalog()
     assert isinstance(r, CatalogResponse)
-    assert len(r.datasets) == 2
+    assert r.datasets[0].name == "default"
 
 
 async def test_async_fetch(make_async_client, load_fixture) -> None:

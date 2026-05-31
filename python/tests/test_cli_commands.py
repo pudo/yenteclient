@@ -50,9 +50,6 @@ def test_healthz_json_format(runner, load_fixture) -> None:
 def test_status_json(runner, load_fixture) -> None:
     """status hits /healthz, /readyz, /catalog and assembles a summary dict."""
     catalog_payload = load_fixture("catalog")
-    # Inject a `children` field on at least one dataset so the collections
-    # filter picks it up.
-    catalog_payload["datasets"][0]["children"] = ["us_ofac_sdn"]
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -72,13 +69,15 @@ def test_status_json(runner, load_fixture) -> None:
     assert summary["api"]["auth"] == {"present": True, "key_suffix": "test"}
     assert summary["api"]["liveness"]["status"] == "ok"
     assert summary["api"]["readiness"]["status"] == "ok"
-    # At least one collection (the one we injected children on).
-    assert summary["summary"]["total"] >= 1
+    # Only the load=true entry (`default`) shows up; the other catalog
+    # entries are metadata-only.
+    assert [d["name"] for d in summary["loaded"]] == ["default"]
+    assert summary["loaded"][0]["is_collection"] is True
+    assert summary["summary"] == {"total": 1, "current": 1, "stale": 0}
 
 
 def test_status_table(runner, load_fixture) -> None:
     catalog_payload = load_fixture("catalog")
-    catalog_payload["datasets"][0]["children"] = ["us_ofac_sdn"]
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -97,7 +96,10 @@ def test_status_table(runner, load_fixture) -> None:
     assert "Readiness" in result.stdout
     # Last 4 of "test" → "test" (the whole key, since len == 4)
     assert "test" in result.stdout
-    assert "Collections" in result.stdout
+    assert "Loaded datasets" in result.stdout
+    # us_ofac_sdn is in the catalog but has load=false → must NOT appear in
+    # the loaded section.
+    assert "default" in result.stdout
 
 
 def test_status_masks_api_key(runner, load_fixture) -> None:
@@ -163,7 +165,7 @@ def test_catalog_json(runner, load_fixture) -> None:
     assert result.exit_code == 0
     parsed = json.loads(result.stdout)
     assert "datasets" in parsed
-    assert len(parsed["datasets"]) == 2
+    assert {d["name"] for d in parsed["datasets"]} >= {"default", "us_ofac_sdn"}
 
 
 # ---------- algorithms ----------

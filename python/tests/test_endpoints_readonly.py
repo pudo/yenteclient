@@ -68,9 +68,8 @@ def test_catalog_returns_catalog_response(make_client, load_fixture) -> None:
     with make_client(handler=_fixed_response(payload)) as c:
         r = c.catalog()
     assert isinstance(r, CatalogResponse)
-    assert len(r.datasets) == 2
     assert r.datasets[0].name == "default"
-    assert r.datasets[1].version == "20260530"
+    assert r.datasets[0].load is True
     assert "default" in r.current
     assert r.index_stale is False
 
