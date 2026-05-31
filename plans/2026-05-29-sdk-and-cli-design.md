@@ -573,6 +573,23 @@ Notes:
 - `--from-file path.json` (for `yente-client match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the wire-format match query. The CLI looks up the schema name in the bundled model, constructs the matching per-schema class, and feeds it to `match()`. Flag-derived properties (`-p KEY=VALUE`) merge into / override the file's properties.
 - `-p` / `--property KEY=VALUE` is the universal property setter on `match`. Repeatable; same key passed twice produces a multi-value property. No per-schema shortcuts (`--first-name` etc.) — the property name on the wire is always what you'd find in the FtM model (`firstName`, `birthDate`, …). Unknown property names fail at construction with a clear pydantic message.
 - The CLI extra `[cli]` pulls in Typer + Rich. Users who install `yente-client` without the extra and try to invoke the binary get a single-line error pointing them at `pip install yente-client[cli]` — see `yente_client.cli._deps` for the import-shim that emits it.
+
+**Short flags.** Long forms are always available; these get short aliases:
+
+| Short | Long | Where |
+| --- | --- | --- |
+| `-s` | `--schema` | `match` (required), `search` (filter) |
+| `-d` | `--datasets` | every command that hits a dataset endpoint; repeatable |
+| `-p` | `--property` | `match` only; repeatable |
+| `-t` | `--topics` | `search`, `match`; repeatable |
+| `-l` | `--limit` | `search`, `match`, `adjacent` |
+| `-a` | `--algorithm` | `match` |
+| `-i` | `--from-file` | `match` ("input") |
+| `-f` | `--format` | every command with output |
+| `-v` | `--verbose` | global; emits stack traces on errors |
+| `-h` | `--help` | global; enabled via Typer `context_settings` |
+
+`-C` is reserved for a future `--config` (config-file) flag — Q2 is deferred but the short namespace is held. `--threshold`, `--nested`, `--countries`, `--exclude-*` etc. stay long-form only.
 - CLI flag names follow the v2 conventions (`--datasets`, `--exclude-entities`, `--exclude-schemata`). The translation to v1 is identical to the SDK's.
 
 ### 5.2 Config precedence
