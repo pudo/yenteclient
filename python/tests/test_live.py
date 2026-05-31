@@ -85,7 +85,7 @@ async def test_async_healthz_returns_ok(live_async_client) -> None:
 
 
 def test_cli_healthz_against_live_api() -> None:
-    """End-to-end CLI smoke: `yente-client healthz` against the real API."""
+    """End-to-end CLI smoke: `yente-cli healthz` against the real API."""
     from yente_client.cli.main import app
 
     key = os.environ.get("OPENSANCTIONS_API_KEY")

@@ -7,7 +7,7 @@ and the hosted [OpenSanctions](https://www.opensanctions.org) API.
 
 ```bash
 pip install yente-client            # SDK only
-pip install yente-client[cli]       # SDK + `yente-client` command-line tool
+pip install yente-client[cli]       # SDK + `yente-cli` command-line tool
 ```
 
 Python 3.11+; runtime deps are `pydantic` and `httpx`. The `[cli]` extra
@@ -87,30 +87,30 @@ Person(notARealProp="X")     # ValidationError — extra="forbid"
 
 ## CLI
 
-`pip install yente-client[cli]` ships a `yente-client` binary that mirrors the SDK:
+`pip install yente-client[cli]` ships a `yente-cli` binary that mirrors the SDK:
 
 ```bash
 export OPENSANCTIONS_API_KEY=sk_...        # or pass --api-key
 
 # Screen a known entity (KYC / sanctions checks):
-yente-client match -s Person -p firstName=Aleksandr -p lastName=Zacharov -d sanctions
+yente-cli match -s Person -p firstName=Aleksandr -p lastName=Zacharov -d sanctions
 
 # Free-text discovery by name:
-yente-client search "acme" -d default -s Company
+yente-cli search "acme" -d default -s Company
 
 # Fetch one entity (id from match/search):
-yente-client fetch NK-aU5ybkbRFJucf8YMwsJvDw
+yente-cli fetch NK-aU5ybkbRFJucf8YMwsJvDw
 
 # Discover the data model (offline, no API key):
-yente-client ref schemas                   # all schemas with matchable flags
-yente-client ref schema Person -f json     # full property list, types, deprecation
-yente-client ref topics                    # the Topic enum
-yente-client ref countries                 # ISO country codes the server speaks
+yente-cli ref schemas                   # all schemas with matchable flags
+yente-cli ref schema Person -f json     # full property list, types, deprecation
+yente-cli ref topics                    # the Topic enum
+yente-cli ref countries                 # ISO country codes the server speaks
 
 # Discover server state:
-yente-client status                        # client + server + auth + loaded datasets
-yente-client catalog                       # full per-source dataset list
-yente-client algorithms                    # enabled algorithms, default + best
+yente-cli status                        # client + server + auth + loaded datasets
+yente-cli catalog                       # full per-source dataset list
+yente-cli algorithms                    # enabled algorithms, default + best
 ```
 
 Output formats: `-f table` (default on TTY), `-f json` (pretty, default when piped),
@@ -128,7 +128,7 @@ Output formats: `-f table` (default on TTY), `-f json` (pretty, default when pip
 
 Designed for LLM agents: every command's `--help` carries worked examples and
 documented JSON output shapes; unknown schema/property names get fuzzy
-suggestions ("Did you mean `birthDate`?"). Run `yente-client --help` first.
+suggestions ("Did you mean `birthDate`?"). Run `yente-cli --help` first.
 
 ## Errors
 

@@ -91,7 +91,7 @@ def test_status_table(runner, load_fixture) -> None:
         mock.route().mock(side_effect=handler)
         result = runner.invoke(app, [*_BASE_FLAGS, "status", "-f", "table"])
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "yente-client" in result.stdout
+    assert "yente-cli" in result.stdout
     assert "Liveness" in result.stdout
     assert "Readiness" in result.stdout
     # Last 4 of "test" → "test" (the whole key, since len == 4)

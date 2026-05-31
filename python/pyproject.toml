@@ -46,7 +46,7 @@ dev = [
 ]
 
 [project.scripts]
-yente-client = "yente_client.cli.main:main"
+yente-cli = "yente_client.cli.main:main"
 
 [project.urls]
 Homepage = "https://github.com/pudo/yenteclient"

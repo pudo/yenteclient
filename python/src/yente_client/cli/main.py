@@ -1,4 +1,4 @@
-"""``yente-client`` CLI entry point.
+"""``yente-cli`` CLI entry point.
 
 The Typer app is configured here; the subcommands themselves live in
 :mod:`yente_client.cli.commands`. The ``main()`` function is what
@@ -10,7 +10,7 @@ from yente_client.cli.commands import register
 from yente_client.cli.config import _DEFAULT_BASE_URL, CliConfig
 
 app = typer.Typer(
-    name="yente-client",
+    name="yente-cli",
     help=(
         "OpenSanctions / yente API client.\n"
         "\n"

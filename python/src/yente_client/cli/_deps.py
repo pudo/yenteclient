@@ -15,7 +15,7 @@ import sys
 
 def _bail(missing: str) -> None:
     sys.stderr.write(
-        f"The yente-client CLI requires the '{missing}' package.\n"
+        f"The yente-cli command requires the '{missing}' package.\n"
         "Install the CLI extra:\n"
         "  pip install 'yente-client[cli]'\n"
     )

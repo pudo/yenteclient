@@ -12,7 +12,7 @@ Two client libraries and one CLI, in a single repo (`/home/pudo/code/yenteclient
 
 - **`python/`** — `yente-client` on PyPI. Sync + async, both backed by `httpx`. Powers the CLI.
 - **`typescript/`** — `@opensanctions/yente-client` on npm. ESM, native `fetch`.
-- **`python/yente_client/cli/`** — `yente-client` CLI (binary name matches PyPI package), built on Typer, driving the Python SDK.
+- **`python/yente_client/cli/`** — the `yente-cli` binary (shipped by the `yente-client[cli]` install extra), built on Typer, driving the Python SDK.
 
 Both SDKs target **the hosted API and self-hosted yente from one client surface**: `base_url` defaults to `https://api.opensanctions.org`; passing an `api_key` adds `Authorization: ApiKey <key>`; omitting it works against self-hosted yente.
 
@@ -28,14 +28,14 @@ From the live OpenAPI (`https://api.opensanctions.org/openapi.json`, yente 5.4.0
 
 | Endpoint (v1 wire) | SDK method | CLI |
 | --- | --- | --- |
-| `POST /match/{dataset}` (one query at a time, see §4.7) | `client.match(entity, **filters)` → `MatchResponse` | `yente-client match` |
-| same, looped client-side | `client.match_many(entities, workers=N)` → `list[MatchResponse]` | (consumed by `yente-client screen`) |
-| same, streaming | `client.match_iter(entity_iter, workers=N)` → `Iterator[(key, MatchResponse)]` | `yente-client screen` |
-| `GET /search/{dataset}` | `client.search(q, datasets=["default"], **opts)` → `SearchResponse` | `yente-client search` |
-| `GET /entities/{id}` | `client.fetch(id, nested=True)` → `Entity` | `yente-client fetch` |
-| `GET /entities/{id}/adjacent[/{prop}]` | `client.adjacent(id, prop=None, **paging)` | `yente-client fetch --adjacent` |
-| `GET /catalog` | `client.catalog()` | `yente-client catalog` |
-| `GET /algorithms` | `client.algorithms()` | `yente-client algorithms` |
+| `POST /match/{dataset}` (one query at a time, see §4.7) | `client.match(entity, **filters)` → `MatchResponse` | `yente-cli match` |
+| same, looped client-side | `client.match_many(entities, workers=N)` → `list[MatchResponse]` | (consumed by `yente-cli screen`) |
+| same, streaming | `client.match_iter(entity_iter, workers=N)` → `Iterator[(key, MatchResponse)]` | `yente-cli screen` |
+| `GET /search/{dataset}` | `client.search(q, datasets=["default"], **opts)` → `SearchResponse` | `yente-cli search` |
+| `GET /entities/{id}` | `client.fetch(id, nested=True)` → `Entity` | `yente-cli fetch` |
+| `GET /entities/{id}/adjacent[/{prop}]` | `client.adjacent(id, prop=None, **paging)` | `yente-cli fetch --adjacent` |
+| `GET /catalog` | `client.catalog()` | `yente-cli catalog` |
+| `GET /algorithms` | `client.algorithms()` | `yente-cli algorithms` |
 | `GET /healthz` / `GET /readyz` | `client.healthz()` / `client.readyz()` | (ops only, no CLI v1) |
 
 Deferred to a later iteration: `/reconcile/*`, `/statements`, `/updatez`.
@@ -77,7 +77,7 @@ yenteclient/
 │   │   │   └── _literals.py         # generated Schema / PropertyType / Topic / Gender Literal types
 │   │   ├── cli/
 │   │   │   ├── __init__.py
-│   │   │   ├── main.py              # `yente-client` entrypoint (Typer app)
+│   │   │   ├── main.py              # `yente-cli` entrypoint (Typer app)
 │   │   │   ├── commands.py          # search, match, fetch, catalog, algorithms
 │   │   │   └── output.py            # json / table / jsonl formatters
 │   │   └── _version.py
@@ -513,7 +513,7 @@ Implementation:
 - **Errors:** by default a failed item raises and cancels in-flight work; with `on_error="collect"` errors are returned in-band as `MatchError(key=..., exception=...)` so a large run can continue.
 - **Rate limits:** the same `RetryPolicy` applies per call; a 429 with `Retry-After` pauses *that* worker, others continue.
 
-The threaded CSV CLI (`yente-client screen`, §5.5) is a thin shell around `match_iter` — same retry policy, same backpressure.
+The threaded CSV CLI (`yente-cli screen`, §5.5) is a thin shell around `match_iter` — same retry policy, same backpressure.
 
 ### 4.8 v1 ↔ v2 translation map
 
@@ -537,7 +537,7 @@ The unwrap is the one structural asymmetry: v1 wraps the result in `responses["q
 ### 5.1 Commands (v1)
 
 ```
-yente-client search QUERY [--datasets default]                    # repeatable
+yente-cli search QUERY [--datasets default]                    # repeatable
                    [--schema Thing]                        # entity-type filter
                    [--limit 10] [--offset 0]
                    [--topics sanction --topics role.pep]   # repeatable
@@ -545,7 +545,7 @@ yente-client search QUERY [--datasets default]                    # repeatable
                    [--filter properties.birthDate:1985]    # repeatable
                    [--format json|jsonl|table]
 
-yente-client match  --schema Person                               # entity type to construct
+yente-cli match  --schema Person                               # entity type to construct
              [-p KEY=VALUE] [-p ...]                       # universal property setter; `--property` is the long form
              [--from-file query.json]                      # see format note below
              [--datasets sanctions]                        # repeatable
@@ -556,29 +556,29 @@ yente-client match  --schema Person                               # entity type 
              [--exclude-schemata Address]                  # repeatable
              [--format json|table]
 
-yente-client fetch  ENTITY_ID
+yente-cli fetch  ENTITY_ID
              [--nested/--no-nested]
              [--adjacent PROPERTY]                         # paginated adjacency
              [--limit 10] [--offset 0]
              [--format json|table]
 
-yente-client catalog    [--current-only] [--format json|table]
-yente-client algorithms [--format json|table]
+yente-cli catalog    [--current-only] [--format json|table]
+yente-cli algorithms [--format json|table]
 
-yente-client ref schemas    [--matchable] [--format json|table]   # list every FtM schema
-yente-client ref schema NAME                  [--format json|table]   # detailed view: properties, types, deprecation, matchable flag
-yente-client ref topics     [--format json|table]   # the Topic enum + labels (sourced from model.types["topic"].values)
-yente-client ref countries  [--format json|table]   # the country code → label lookup
+yente-cli ref schemas    [--matchable] [--format json|table]   # list every FtM schema
+yente-cli ref schema NAME                  [--format json|table]   # detailed view: properties, types, deprecation, matchable flag
+yente-cli ref topics     [--format json|table]   # the Topic enum + labels (sourced from model.types["topic"].values)
+yente-cli ref countries  [--format json|table]   # the country code → label lookup
 
-yente-client status         [--format json|table]   # client + server + loaded datasets (see §5.6)
-yente-client healthz        [--format json|table]   # liveness probe only
+yente-cli status         [--format json|table]   # client + server + loaded datasets (see §5.6)
+yente-cli healthz        [--format json|table]   # liveness probe only
 ```
 
 Notes:
 
 - `--datasets` (plural) is used by both `search` and `match`; the CLI translates the same way the SDK does (first → URL path param, rest → repeated `include_dataset` query params). See §4.8.
-- `--schema` is overloaded by context: on `yente-client search` it filters results by entity type; on `yente-client match` it specifies the type of entity being constructed from the other flags. Acceptable because each command has only one natural meaning for it.
-- `--from-file path.json` (for `yente-client match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the wire-format match query. The CLI looks up the schema name in the bundled model, constructs the matching per-schema class, and feeds it to `match()`. Flag-derived properties (`-p KEY=VALUE`) merge into / override the file's properties.
+- `--schema` is overloaded by context: on `yente-cli search` it filters results by entity type; on `yente-cli match` it specifies the type of entity being constructed from the other flags. Acceptable because each command has only one natural meaning for it.
+- `--from-file path.json` (for `yente-cli match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the wire-format match query. The CLI looks up the schema name in the bundled model, constructs the matching per-schema class, and feeds it to `match()`. Flag-derived properties (`-p KEY=VALUE`) merge into / override the file's properties.
 - `-p` / `--property KEY=VALUE` is the universal property setter on `match`. Repeatable; same key passed twice produces a multi-value property. No per-schema shortcuts (`--first-name` etc.) — the property name on the wire is always what you'd find in the FtM model (`firstName`, `birthDate`, …). Unknown property names fail at construction with a clear pydantic message.
 - The CLI extra `[cli]` pulls in Typer + Rich. Users who install `yente-client` without the extra and try to invoke the binary get a single-line error pointing them at `pip install yente-client[cli]` — see `yente_client.cli._deps` for the import-shim that emits it.
 - `ref` is purely offline — reads the bundled `model.json`, no network call, no API key needed. Useful for first-time discovery (run `ref schemas` before deciding what to `match` against) and for LLM agents inspecting what's queryable. Output with `-f json` is parser-friendly so an agent can fold it into its own context.
@@ -614,7 +614,7 @@ Notes:
 
 - **`--format json`** (default for piping) — single JSON document, matching the v2-flat shape (`{query, results, total, limit}` for `match`).
 - **`--format jsonl`** — one entity / hit per line. Useful for `jq` and the `screen` command.
-- **`--format table`** (default for TTY, auto-detected) — Rich table; columns for `match`: `score | id | caption | datasets | topics`. Truncates long captions; full record available via `yente-client fetch ID`.
+- **`--format table`** (default for TTY, auto-detected) — Rich table; columns for `match`: `score | id | caption | datasets | topics`. Truncates long captions; full record available via `yente-cli fetch ID`.
 
 ### 5.4 Exit codes
 
@@ -624,13 +624,13 @@ Notes:
 - `3` — API error (non-2xx response).
 - `4` — transport error (network, timeout).
 
-The zero-results-as-1 convention is deliberate: it lets shell scripts use `yente-client match … && …` to gate on "we found something."
+The zero-results-as-1 convention is deliberate: it lets shell scripts use `yente-cli match … && …` to gate on "we found something."
 
 ### 5.5 Agent-oriented help and discoverability
 
-A primary use-case for this CLI is **LLM coding agents that have never read the OpenSanctions docs**. The agent's first interaction is usually `yente-client --help`; everything they need to use the tool productively should flow from there. Concretely:
+A primary use-case for this CLI is **LLM coding agents that have never read the OpenSanctions docs**. The agent's first interaction is usually `yente-cli --help`; everything they need to use the tool productively should flow from there. Concretely:
 
-**Top-level `yente-client --help`** carries a *workflow* block that maps user-intent to command:
+**Top-level `yente-cli --help`** carries a *workflow* block that maps user-intent to command:
 
 ```
 WHICH COMMAND DO I WANT?
@@ -659,9 +659,9 @@ The repetition is intentional — agents may have grabbed only one command's hel
 
 | Trigger | Message |
 | --- | --- |
-| `match -s Persn …` | `Unknown schema 'Persn'. Run 'yente-client ref schemas' for the full list. Did you mean: Person?` |
-| `match -s Person -p birth_date=…` | `Property 'birth_date' not on Person. Run 'yente-client ref schema Person'. Did you mean: birthDate?` |
-| `match -s Document …` (non-matchable) | `Schema 'Document' is not matchable. Matchable schemas: Person, Company, Vessel, … (run 'yente-client ref schemas --matchable').` |
+| `match -s Persn …` | `Unknown schema 'Persn'. Run 'yente-cli ref schemas' for the full list. Did you mean: Person?` |
+| `match -s Person -p birth_date=…` | `Property 'birth_date' not on Person. Run 'yente-cli ref schema Person'. Did you mean: birthDate?` |
+| `match -s Document …` (non-matchable) | `Schema 'Document' is not matchable. Matchable schemas: Person, Company, Vessel, … (run 'yente-cli ref schemas --matchable').` |
 | No API key + hosted URL | (existing warning) + `Get a key at https://opensanctions.org/account/` |
 
 Fuzzy suggestion uses a stdlib `difflib.get_close_matches` against the bundled `model.json` — no extra dep.
@@ -672,12 +672,12 @@ Fuzzy suggestion uses a stdlib `difflib.get_close_matches` against the bundled `
 
 Deferred for after M4: `--help-json` per command (machine-readable help dumps), a top-level `examples` command (epilog covers it), `man` page generation.
 
-### 5.6 `yente-client status`
+### 5.6 `yente-cli status`
 
 The `status` command consolidates everything you'd want to confirm at the start of a session — what client is installed, what server it's pointing at, whether that server is healthy, and what datasets it has actually indexed. Replaces the separate `version` / `readyz` commands and the top-level `--version` flag.
 
 ```
-yente-client 0.1.0
+yente-cli 0.1.0
 Bundled FtM model: 2026-05-29T14:06:23
 
 API:        https://api.opensanctions.org
@@ -692,16 +692,16 @@ Loaded datasets:
 ```
 
 Notes:
-- The "Loaded datasets" section filters the catalog to entries where `load: true`. A yente server typically loads one or two top-level datasets (often a collection like `default`); its members ride along in the same index and have no independent freshness state, so listing them here would be misleading. The full catalog is one `yente-client catalog` away.
+- The "Loaded datasets" section filters the catalog to entries where `load: true`. A yente server typically loads one or two top-level datasets (often a collection like `default`); its members ride along in the same index and have no independent freshness state, so listing them here would be misleading. The full catalog is one `yente-cli catalog` away.
 - "current" / "STALE" reflects the loaded dataset's `index_current` flag — does the running index match the latest exported version?
 - API key is masked to the last 4 characters (never the full value, including in JSON output).
 - A failing `/readyz` is reported as an error row but doesn't abort the command — the catalog fetch still runs.
 - All three probes (`/healthz`, `/readyz`, `/catalog`) share one `Client` instance so they reuse the same HTTP connection.
 
-### 5.7 M7 — `yente-client screen`
+### 5.7 M7 — `yente-cli screen`
 
 ```
-yente-client screen INPUT.csv
+yente-cli screen INPUT.csv
              --schema Person
              --map first_name:firstName --map last_name:lastName --map dob:birthDate
              [--id-col customer_id]                # used as the per-row key
@@ -764,15 +764,15 @@ Notes:
 1. **Python codegen pipeline + entity classes + literal types** — `scripts/regen_model.py`, Python Jinja templates, committed `model/model.json`, generated `python/src/yente_client/entities/_generated.py` and `schemas/_literals.py`. CI `--check`. No HTTP client yet. End: `from yente_client.entities import Person` is importable; `mypy --strict` passes on the generated module; `regen --check` is idempotent. See the dedicated M1 plan in `plans/2026-05-29-m1-python-codegen.md` for the breakdown.
 2. **Python sync Client + response models + errors + tests** — covers `match` (v2-shaped surface, v1 wire), `search`, `fetch`, `adjacent`, `catalog`, `algorithms`, `healthz`, `readyz`. Builds on M1's generated entities and bundled model. No async, no CLI. End: `yente-client` installable from source; tests pass against fixtures.
 3. **AsyncClient** — parity with `Client`, reusing the request-builder layer.
-4. **CLI MVP** — `yente-client search` / `match` / `fetch` / `catalog` / `algorithms`. JSON / JSONL / table formatters. Config precedence + env var handling. Single-call only — bulk workflows wait for the fan-out kernel in M5. End: a working CLI that drives the existing Client end-to-end.
+4. **CLI MVP** — `yente-cli search` / `match` / `fetch` / `catalog` / `algorithms`. JSON / JSONL / table formatters. Config precedence + env var handling. Single-call only — bulk workflows wait for the fan-out kernel in M5. End: a working CLI that drives the existing Client end-to-end.
 5. **`match_many` / `match_iter`** — client-side fan-out, threaded + async, with bounded concurrency and `on_error` policy. SDK-level only at this stage; the CLI gets its bulk command in M7.
 6. **TypeScript SDK v1** — `Client` + models + errors + entities. Native fetch. zod-based response validation. Extends the regen pipeline with TS Jinja templates so both languages stay model-locked.
-7. **`yente-client screen` CLI** — threaded CSV screening, resumable, built on `match_iter` (M5). Bulk-workflow surface that turns the SDK into a useful command-line screening tool.
+7. **`yente-cli screen` CLI** — threaded CSV screening, resumable, built on `match_iter` (M5). Bulk-workflow surface that turns the SDK into a useful command-line screening tool.
 8. **First publish** — PyPI + npm 0.1.0, README quickstarts, GitHub Actions release on tag. Pushed back from earlier to keep the first release feature-complete (CLI single + bulk + TS).
 9. **Coverage gaps** — `/reconcile/*`, `/statements`, `/updatez`. Added as separate methods; no API redesign needed.
 10. **`/v2/match` cut-over** — when the server ships v2, rewrite the call layer in `_http.py` only. Public API unchanged; users get strict 400 errors and dataset DSL for free.
 
-**Sequencing rationale:** the CLI MVP (M4) precedes the fan-out kernel (M5) so we get a user-facing command-line tool early, and `match_many` / `match_iter` are designed with a known concrete consumer (`yente-client screen` in M7). Publishing waits until both the single-call and bulk CLI exist so first-impression users don't see an obviously incomplete tool.
+**Sequencing rationale:** the CLI MVP (M4) precedes the fan-out kernel (M5) so we get a user-facing command-line tool early, and `match_many` / `match_iter` are designed with a known concrete consumer (`yente-cli screen` in M7). Publishing waits until both the single-call and bulk CLI exist so first-impression users don't see an obviously incomplete tool.
 
 Stop and check in at the end of each milestone. Especially before publishing (step 8) — that's a one-way door.
 

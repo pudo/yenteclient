@@ -1,4 +1,4 @@
-"""Output formatters for ``yente-client`` subcommands.
+"""Output formatters for ``yente-cli`` subcommands.
 
 Three formats — ``json`` (pretty), ``jsonl`` (one item per line, for ``jq`` /
 LLM pipelines), and ``table`` (Rich, default on TTY). Per-command callers

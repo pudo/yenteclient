@@ -1,4 +1,4 @@
-"""``yente-client`` subcommand implementations.
+"""``yente-cli`` subcommand implementations.
 
 Each command is a thin wrapper around the SDK; entity construction, filter
 translation, and HTTP details live in :mod:`yente_client.client`. This
@@ -154,9 +154,10 @@ def status_command(
 ) -> None:
     """Show the client setup and live server state at a glance.
 
-    Reports the installed ``yente-client`` version, the bundled FtM model
-    snapshot, the API URL, the masked API key, both liveness and readiness
-    probes (with timing), and the datasets the server has actually loaded
+    Reports the installed CLI version (drawn from the ``yente-client``
+    package), the bundled FtM model snapshot, the API URL, the masked API
+    key, both liveness and readiness probes (with timing), and the datasets
+    the server has actually loaded
     (``load: true`` entries in the catalog — typically one or two top-level
     datasets / collections; their members ride along in the index without
     independent freshness).
@@ -267,7 +268,7 @@ def _render_status_table(summary: dict[str, Any]) -> None:
     """Render the status summary in the TTY-friendly form."""
     client_info = summary["client"]
     api = summary["api"]
-    typer.echo(f"yente-client {client_info['version']}")
+    typer.echo(f"yente-cli {client_info['version']}")
     typer.echo(f"Bundled FtM model: {client_info['model_snapshot']}")
     typer.echo("")
     typer.echo(f"API:        {api['url']}")
@@ -459,7 +460,7 @@ def search_command(
     relevance, `match` by entity-shape scoring.
 
     Exits 1 (no results) when the query returns zero hits, so shell scripts
-    can gate on `yente-client search … && …`.
+    can gate on `yente-cli search … && …`.
     """
     search_kwargs: dict[str, Any] = {}
     if datasets:
@@ -593,7 +594,7 @@ def match_command(
     fully-described entity against the dataset's risk lists.
 
     Exits 1 if no results returned, so shell scripts can gate on
-    `yente-client match … && …`.
+    `yente-cli match … && …`.
     """
     entity = _build_entity_input(schema, properties or [], from_file)
 
@@ -663,7 +664,7 @@ def _build_entity_input(schema: str, properties: list[str], from_file: Path | No
         suggestion = _suggest_schema(schema)
         hint = f" Did you mean: {suggestion}?" if suggestion else ""
         typer.echo(
-            f"error: Unknown schema {schema!r}.{hint} Run `yente-client ref schemas` for the list.",
+            f"error: Unknown schema {schema!r}.{hint} Run `yente-cli ref schemas` for the list.",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -778,7 +779,7 @@ def ref_schema_command(
         suggestion = _suggest_schema(name)
         hint = f" Did you mean: {suggestion}?" if suggestion else ""
         typer.echo(
-            f"error: Unknown schema {name!r}.{hint} Run `yente-client ref schemas` for the list.",
+            f"error: Unknown schema {name!r}.{hint} Run `yente-cli ref schemas` for the list.",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -938,9 +939,9 @@ def register(app: typer.Typer) -> None:
 
 _STATUS_EPILOG = """\
 EXAMPLES:
-  yente-client status                          # TTY-friendly summary
-  yente-client status -f json                  # parseable summary for agents
-  yente-client status --base-url http://...    # check a self-hosted yente
+  yente-cli status                          # TTY-friendly summary
+  yente-cli status -f json                  # parseable summary for agents
+  yente-cli status --base-url http://...    # check a self-hosted yente
 
 OUTPUT (with -f json):
   {
@@ -964,7 +965,7 @@ datasets the server is actually indexing. Replaces the older
 `version` and `readyz` subcommands.
 
 The full catalog (every dataset visible to the server, loaded or
-not) is available via `yente-client catalog`.
+not) is available via `yente-cli catalog`.
 """
 
 _HEALTHZ_EPILOG = """\
@@ -974,9 +975,9 @@ the connection (auth, readiness, catalog), use `status`.
 
 _CATALOG_EPILOG = """\
 EXAMPLES:
-  yente-client catalog                       # human-readable table
-  yente-client catalog -f json               # full CatalogResponse as JSON
-  yente-client catalog --current-only        # skip stale-index datasets
+  yente-cli catalog                       # human-readable table
+  yente-cli catalog -f json               # full CatalogResponse as JSON
+  yente-cli catalog --current-only        # skip stale-index datasets
 
 OUTPUT (with -f json):
   {datasets: [{name, title, version, index_current}, ...],
@@ -987,8 +988,8 @@ The `name` field is what you pass to `-d` / `--datasets` on match/search.
 
 _ALGORITHMS_EPILOG = """\
 EXAMPLES:
-  yente-client algorithms
-  yente-client algorithms -f json
+  yente-cli algorithms
+  yente-cli algorithms -f json
 
 OUTPUT (with -f json):
   {algorithms: [{name, description, docs}], default: str, best: str}
@@ -999,9 +1000,9 @@ stable across version bumps.
 
 _FETCH_EPILOG = """\
 EXAMPLES:
-  yente-client fetch NK-aU5ybkbRFJucf8YMwsJvDw                # summary table
-  yente-client fetch <id> -f json                              # full Entity as JSON
-  yente-client fetch <id> --no-nested                          # skip adjacent entities
+  yente-cli fetch NK-aU5ybkbRFJucf8YMwsJvDw                # summary table
+  yente-cli fetch <id> -f json                              # full Entity as JSON
+  yente-cli fetch <id> --no-nested                          # skip adjacent entities
 
 OUTPUT (with -f json):
   Entity object: {id, caption, schema, properties: {<name>: [...]}, datasets,
@@ -1013,10 +1014,10 @@ properties (sanctions, ownerships, family, ...) inline as nested Entity objects.
 
 _SEARCH_EPILOG = """\
 EXAMPLES:
-  yente-client search "acme"                                            # default dataset
-  yente-client search "acme" -d default -s Company                      # type filter
-  yente-client search "vladimir putin" -d sanctions -t sanction -l 5
-  yente-client search "x" -d default --filter properties.birthDate:1965 -f json
+  yente-cli search "acme"                                            # default dataset
+  yente-cli search "acme" -d default -s Company                      # type filter
+  yente-cli search "vladimir putin" -d sanctions -t sanction -l 5
+  yente-cli search "x" -d default --filter properties.birthDate:1965 -f json
 
 OUTPUT (with -f json):
   SearchResponse: {results: [Entity, ...], facets: {...}, total: {value, relation},
@@ -1034,14 +1035,14 @@ and want to screen it against risk lists.
 
 _MATCH_EPILOG = """\
 EXAMPLES:
-  yente-client match -s Person -p firstName=Aleksandr -p lastName=Zacharov -d sanctions
-  yente-client match -s Company -p name="Acme LLC" -p jurisdiction=us -d default
-  yente-client match -s Person -p firstName=X -p firstName=Alexander -d sanctions   # multi-value
-  yente-client match -s Person -i query.json -d sanctions -a best                    # from JSON
-  yente-client match -s Person -p name=Putin -d sanctions -f jsonl     # LLM-friendly
+  yente-cli match -s Person -p firstName=Aleksandr -p lastName=Zacharov -d sanctions
+  yente-cli match -s Company -p name="Acme LLC" -p jurisdiction=us -d default
+  yente-cli match -s Person -p firstName=X -p firstName=Alexander -d sanctions   # multi-value
+  yente-cli match -s Person -i query.json -d sanctions -a best                    # from JSON
+  yente-cli match -s Person -p name=Putin -d sanctions -f jsonl     # LLM-friendly
 
 PROPERTY NAMES:
-  Run `yente-client ref schema Person` (or Company, Vessel, ...) to see what
+  Run `yente-cli ref schema Person` (or Company, Vessel, ...) to see what
   properties a schema accepts. Names are FtM camelCase: `firstName`, `birthDate`,
   `lastName`, `country`, `nationality` — not snake_case.
 
@@ -1062,19 +1063,19 @@ Use `search` instead for free-text discovery by name.
 
 _REF_SCHEMAS_EPILOG = """\
 EXAMPLES:
-  yente-client ref schemas                       # all schemas
-  yente-client ref schemas --matchable           # only what you can `match` against
-  yente-client ref schemas -f json               # for LLM consumption
+  yente-cli ref schemas                       # all schemas
+  yente-cli ref schemas --matchable           # only what you can `match` against
+  yente-cli ref schemas -f json               # for LLM consumption
 
 For details on one schema (properties, types, deprecation flags):
-  yente-client ref schema Person
+  yente-cli ref schema Person
 """
 
 _REF_SCHEMA_EPILOG = """\
 EXAMPLES:
-  yente-client ref schema Person
-  yente-client ref schema Company -f json        # full LLM-friendly summary
-  yente-client ref schema Sanction -f jsonl      # one property per line
+  yente-cli ref schema Person
+  yente-cli ref schema Company -f json        # full LLM-friendly summary
+  yente-cli ref schema Sanction -f jsonl      # one property per line
 
 OUTPUT (with -f json):
   {name, label, description, matchable, abstract, extends, schemata,
