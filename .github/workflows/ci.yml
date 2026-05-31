@@ -65,6 +65,17 @@ jobs:
         working-directory: python
         run: mkdocs build --strict
 
+      - name: CHANGELOG touched (advisory, PRs only)
+        if: github.event_name == 'pull_request' && matrix.python-version == '3.12'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        # The diff needs the merge-base commit; checkout above is shallow by default.
+        run: |
+          git fetch origin "$BASE_SHA" --depth=1 || true
+          python scripts/check_changelog.py
+
   live-api:
     # Runs only after the offline matrix is green, and only when secrets are
     # available — i.e. on push to main or on PRs from the same repo. PRs from
