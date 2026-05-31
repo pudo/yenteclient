@@ -33,7 +33,7 @@ jobs:
     outputs:
       version: ${{ steps.assert.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -70,7 +70,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -109,7 +109,7 @@ jobs:
     needs: [validate, test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -184,7 +184,7 @@ jobs:
       attestations: write  # PEP 740 attestations
       contents: write  # creating the GitHub Release entry below
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download dist artifact
         uses: actions/download-artifact@v8
