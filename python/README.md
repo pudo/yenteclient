@@ -105,9 +105,11 @@ yente-client fetch NK-aU5ybkbRFJucf8YMwsJvDw
 yente-client ref schemas                   # all schemas with matchable flags
 yente-client ref schema Person -f json     # full property list, types, deprecation
 yente-client ref topics                    # the Topic enum
+yente-client ref countries                 # ISO country codes the server speaks
 
 # Discover server state:
-yente-client catalog                       # datasets + freshness
+yente-client status                        # client + server + auth + top-level collections
+yente-client catalog                       # full per-source dataset list
 yente-client algorithms                    # enabled algorithms, default + best
 ```
 

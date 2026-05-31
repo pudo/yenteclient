@@ -568,8 +568,10 @@ yente-client algorithms [--format json|table]
 yente-client ref schemas    [--matchable] [--format json|table]   # list every FtM schema
 yente-client ref schema NAME                  [--format json|table]   # detailed view: properties, types, deprecation, matchable flag
 yente-client ref topics     [--format json|table]   # the Topic enum + labels (sourced from model.types["topic"].values)
-yente-client ref types      [--format json|table]   # FtM property types (name, date, country, …)
-yente-client ref genders    [--format json|table]   # small Gender enum
+yente-client ref countries  [--format json|table]   # the country code → label lookup
+
+yente-client status         [--format json|table]   # client + server + catalog summary (see §5.7)
+yente-client healthz        [--format json|table]   # liveness probe only
 ```
 
 Notes:
@@ -664,21 +666,40 @@ The repetition is intentional — agents may have grabbed only one command's hel
 
 Fuzzy suggestion uses a stdlib `difflib.get_close_matches` against the bundled `model.json` — no extra dep.
 
-**`yente-client --version`** outputs both the package version *and* the bundled FtM model identity so agents can reason about what's queryable:
-
-```
-yente-client 0.1.0
-Bundled FtM model: 2026-05-30
-Default API:       https://api.opensanctions.org
-```
-
 **Stable JSON output schemas in every command's help** under an `OUTPUT:` block. Documenting the shape in the help text — not just in the OpenAPI — means an agent doesn't have to either invoke-and-parse or read external specs to know what fields they get.
 
 **`ref schema NAME -f json`** emits an LLM-friendly summary of one schema (extends, featured, required, properties with types + matchable flag + deprecation). This is the "introspect-before-you-construct" path: agent runs `ref schema Person -f json`, has the property list, then constructs a valid `match` call.
 
 Deferred for after M4: `--help-json` per command (machine-readable help dumps), a top-level `examples` command (epilog covers it), `man` page generation.
 
-### 5.6 M7 — `yente-client screen`
+### 5.6 `yente-client status`
+
+The `status` command consolidates everything you'd want to confirm at the start of a session — what client is installed, what server it's pointing at, whether that server is healthy, and what collections are queryable. Replaces the separate `version` / `readyz` commands and the top-level `--version` flag.
+
+```
+yente-client 0.1.0
+Bundled FtM model: 2026-05-29T14:06:23
+
+API:        https://api.opensanctions.org
+Auth:       ApiKey ···· 1e95
+Liveness:   ok    (32 ms)
+Readiness:  ok    (19 ms)
+
+Collections:
+  sanctions   Consolidated Sanctions   v=20260531074701-liy   current
+  peps        Politically Exposed …    v=20260530152701-kxs   STALE
+  …
+
+15 collections, 1 current, 14 stale
+```
+
+Notes:
+- API key is masked to the last 4 characters (never the full value in JSON output either).
+- A failing `/readyz` is reported as an error row but doesn't abort the command — the catalog fetch still runs.
+- "Collections" filters the catalog to datasets where `len(children) > 0` (the parent groupings: `sanctions`, `peps`, `crime`, `all`, …). The full per-source list is still available via `yente-client catalog`.
+- All three probes (`/healthz`, `/readyz`, `/catalog`) share one `Client` instance so they reuse the same HTTP connection.
+
+### 5.7 M7 — `yente-client screen`
 
 ```
 yente-client screen INPUT.csv
