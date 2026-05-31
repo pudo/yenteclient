@@ -1,0 +1,67 @@
+site_name: yente-client
+site_description: Python SDK and CLI for the yente / OpenSanctions matching API
+site_url: https://yenteclient.example/  # placeholder; we don't host yet
+repo_url: https://github.com/pudo/yenteclient
+repo_name: pudo/yenteclient
+edit_uri: edit/main/python/docs/
+
+docs_dir: docs
+site_dir: site  # gitignored; mkdocs build output
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+            members_order: alphabetical
+            filters:
+              - "!^_"
+          paths: [src]
+
+nav:
+  - Home: index.md
+  - Tutorial: tutorial.md
+  - CLI overview: cli.md
+  - API reference:
+      - api/index.md
+      - Client: api/client.md
+      - AsyncClient: api/async_client.md
+      - Entities: api/entities.md
+      - Filters: api/filters.md
+      - Response models: api/models.md
+      - Exceptions: api/exceptions.md
+      - Schemas: api/schemas.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - toc:
+      permalink: true

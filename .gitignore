@@ -1,3 +1,6 @@
+# mkdocs build output
+python/site/
+
 # Python
 __pycache__/
 *.py[cod]

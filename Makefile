@@ -1,6 +1,6 @@
 PY := python/.venv/bin/python
 
-.PHONY: setup regen-model regen-model-check test lint
+.PHONY: setup regen-model regen-model-check test lint docs docs-serve docs-check
 
 # Use uv because system python 3.14 ships without ensurepip on this box.
 setup:
@@ -18,3 +18,12 @@ test:
 
 lint:
 	cd python && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/mypy
+
+docs:
+	cd python && .venv/bin/mkdocs build
+
+docs-serve:
+	cd python && .venv/bin/mkdocs serve
+
+docs-check:
+	cd python && .venv/bin/mkdocs build --strict
