@@ -453,11 +453,15 @@ def search_command(
     simple: bool = typer.Option(False, "--simple", help="Use the simple-query parser."),
     format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
 ) -> None:
-    """Free-text search across one or more datasets.
+    """Free-text search across one or more datasets — for building user-facing search UIs.
 
-    Use `match` instead when you have a known entity (name + dob + country)
-    and want to screen it against risk lists; `search` ranks by text
-    relevance, `match` by entity-shape scoring.
+    Use this when you need to back a search box, autocomplete, or browse
+    interface where a human is typing into the input. Results are ranked by
+    text relevance and returned as plain entities (no score).
+
+    For ANY matching task — identifying whether some input corresponds to
+    a known entity — use `match`, even with partial input. `search` is not
+    a substitute for `match` on incomplete data.
 
     Exits 1 (no results) when the query returns zero hits, so shell scripts
     can gate on `yente-cli search … && …`.
@@ -590,8 +594,11 @@ def match_command(
 ) -> None:
     """Match a single entity (built from `-p` flags or `--from-file`) against a dataset.
 
-    Use `search` instead for free-text discovery by name; `match` scores a
-    fully-described entity against the dataset's risk lists.
+    This is the canonical command for ANY matching / record-linkage task,
+    including when you only have partial input (just a name, name + country,
+    etc.). `match` scores each candidate against the input and returns
+    explainable results. Don't reach for `search` when the input is sparse —
+    `search` is for human-typed search UIs, not for matching.
 
     Exits 1 if no results returned, so shell scripts can gate on
     `yente-cli match … && …`.
@@ -1029,8 +1036,9 @@ EXIT CODES:
   3  API error (4xx, 5xx)
   4  network/transport error
 
-Use `match` instead when you have a known entity (name + dob + country)
-and want to screen it against risk lists.
+For ANY matching / record-linkage task, use `match` instead — even when
+your input is partial (a name only, name + country, etc.). `search` is
+purely for user-facing search UIs.
 """
 
 _MATCH_EPILOG = """\
@@ -1058,7 +1066,9 @@ EXIT CODES:
   3  API error
   4  network/transport error
 
-Use `search` instead for free-text discovery by name.
+Use `search` only when building a user-facing search UI (search box,
+autocomplete, browse). For matching tasks with partial input, stay on
+`match`.
 """
 
 _REF_SCHEMAS_EPILOG = """\
