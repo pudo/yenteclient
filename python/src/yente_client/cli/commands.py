@@ -24,6 +24,7 @@ from yente_client.cli.output import (
 )
 from yente_client.entities import EntityInput
 from yente_client.models import Entity
+from yente_client.schemas import has_schema, model
 
 _FORMAT_HELP = "Output format. `auto` (default) renders a table on a TTY and JSON when piped."
 
@@ -482,6 +483,244 @@ def _build_entity_input(schema: str, properties: list[str], from_file: Path | No
         raise typer.Exit(code=2) from exc
 
 
+# ----- ref (offline FtM model introspection) -----
+
+
+def ref_schemas_command(
+    matchable_only: bool = typer.Option(
+        False,
+        "--matchable",
+        help="Filter to schemas that can be used as `match` query targets.",
+    ),
+    format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
+) -> None:
+    """List every FtM schema in the bundled model.
+
+    Offline — no API call, no API key needed. Use this to discover what `-s`
+    values you can pass to `match` or `search`. For details on one schema,
+    run ``ref schema NAME``.
+    """
+    schemata = model["schemata"]
+    entries: list[dict[str, Any]] = []
+    for name in sorted(schemata):
+        defn = schemata[name]
+        if matchable_only and not defn.get("matchable"):
+            continue
+        entries.append(
+            {
+                "name": name,
+                "label": defn.get("label", ""),
+                "matchable": bool(defn.get("matchable", False)),
+                "abstract": bool(defn.get("abstract", False)),
+                "extends": list(defn.get("extends") or []),
+                "description": (defn.get("description") or "").strip(),
+            }
+        )
+
+    fmt = resolve_format(format_)
+    if fmt == Format.JSON:
+        print_json(entries)
+    elif fmt == Format.JSONL:
+        print_jsonl(entries)
+    else:
+        rows = [
+            [
+                e["name"],
+                "✓" if e["matchable"] else "",
+                "abstract" if e["abstract"] else "",
+                ", ".join(e["extends"]),
+                _truncate(e["description"], 60),
+            ]
+            for e in entries
+        ]
+        print_table(
+            rows,
+            headers=["schema", "matchable", "flags", "extends", "description"],
+            title=f"{len(entries)} schema(s)",
+        )
+
+
+def ref_schema_command(
+    name: str = typer.Argument(..., help="Schema name, e.g. `Person`, `Company`, `Vessel`."),
+    format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
+) -> None:
+    """Show one schema's properties, types, and inheritance.
+
+    Includes inherited properties (walks the ancestor chain), so what you
+    see is the complete set of fields you can pass via `-p KEY=VALUE` to
+    `match`. With ``-f json`` the output is LLM-friendly and includes per-
+    property type and `deprecated` flags.
+    """
+    if not has_schema(name):
+        typer.echo(
+            f"error: Unknown schema {name!r}. Run `yente-client ref schemas` for the list.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    schemata = model["schemata"]
+    defn = schemata[name]
+    properties = _collect_schema_properties(name)
+    summary: dict[str, Any] = {
+        "name": name,
+        "label": defn.get("label", ""),
+        "description": (defn.get("description") or "").strip(),
+        "matchable": bool(defn.get("matchable", False)),
+        "abstract": bool(defn.get("abstract", False)),
+        "extends": list(defn.get("extends") or []),
+        "schemata": list(defn.get("schemata") or []),
+        "featured": list(defn.get("featured") or []),
+        "required": list(defn.get("required") or []),
+        "properties": properties,
+    }
+
+    fmt = resolve_format(format_)
+    if fmt == Format.JSON:
+        print_json(summary)
+    elif fmt == Format.JSONL:
+        # One property per line — useful for agents iterating over the prop list.
+        print_jsonl(properties)
+    else:
+        typer.echo(f"{name}  ({defn.get('label', '')})")
+        if summary["description"]:
+            typer.echo(summary["description"])
+        typer.echo("")
+        typer.echo(f"  matchable:  {'yes' if summary['matchable'] else 'no'}")
+        typer.echo(f"  extends:    {', '.join(summary['extends']) or '(none)'}")
+        typer.echo(f"  featured:   {', '.join(summary['featured']) or '(none)'}")
+        typer.echo(f"  required:   {', '.join(summary['required']) or '(none)'}")
+        typer.echo("")
+        rows = [
+            [
+                p["name"],
+                p["type"],
+                "deprecated" if p["deprecated"] else "",
+                _truncate(p["description"], 50),
+            ]
+            for p in properties
+        ]
+        print_table(
+            rows,
+            headers=["property", "type", "flags", "description"],
+            title=f"{len(properties)} property/properties (own + inherited)",
+        )
+
+
+def _collect_schema_properties(name: str) -> list[dict[str, Any]]:
+    """Walk the ancestor chain and return one row per property name.
+
+    Mirrors ``scripts/regen_model.py``'s ``collect_properties`` shape so the
+    `ref schema` view matches what the codegen would generate. Stub
+    properties (reverse edges) are excluded — they're navigation-only.
+    """
+    schemata = model["schemata"]
+    seen: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for ancestor in schemata[name].get("schemata", [name]):
+        anc_props = schemata.get(ancestor, {}).get("properties", {})
+        for prop_name, prop_def in anc_props.items():
+            if prop_name in seen or prop_def.get("stub"):
+                continue
+            seen.add(prop_name)
+            rows.append(
+                {
+                    "name": prop_name,
+                    "type": prop_def.get("type", "string"),
+                    "label": prop_def.get("label", ""),
+                    "description": (prop_def.get("description") or "").strip(),
+                    "deprecated": bool(prop_def.get("deprecated", False)),
+                    "from_schema": ancestor,
+                }
+            )
+    rows.sort(key=lambda r: r["name"])
+    return rows
+
+
+def ref_topics_command(
+    format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
+) -> None:
+    """List the Topic enum (the canonical risk tags an entity can carry).
+
+    Use these names with `-t` / `--topics` on `match` and `search`. Sourced
+    from ``model.types["topic"].values`` in the bundled snapshot.
+    """
+    topic_values = model["types"].get("topic", {}).get("values", {})
+    entries = [{"name": name, "label": label} for name, label in sorted(topic_values.items())]
+    fmt = resolve_format(format_)
+    if fmt == Format.JSON:
+        print_json(entries)
+    elif fmt == Format.JSONL:
+        print_jsonl(entries)
+    else:
+        rows = [[e["name"], e["label"]] for e in entries]
+        print_table(rows, headers=["topic", "label"], title=f"{len(entries)} topic(s)")
+
+
+def ref_types_command(
+    format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
+) -> None:
+    """List the FtM property type set (name, address, date, country, ...).
+
+    Each entry has a label and (where it's an enum) a value count. Use this
+    to interpret the `type` column shown by ``ref schema NAME``.
+    """
+    types = model["types"]
+    entries = [
+        {
+            "name": tname,
+            "label": tdef.get("label", ""),
+            "values_count": len(tdef.get("values") or {}),
+            "matchable": bool(tdef.get("matchable", False)),
+        }
+        for tname, tdef in sorted(types.items())
+    ]
+
+    fmt = resolve_format(format_)
+    if fmt == Format.JSON:
+        print_json(entries)
+    elif fmt == Format.JSONL:
+        print_jsonl(entries)
+    else:
+        rows = [
+            [
+                e["name"],
+                e["label"],
+                str(e["values_count"]) if e["values_count"] else "",
+                "✓" if e["matchable"] else "",
+            ]
+            for e in entries
+        ]
+        print_table(rows, headers=["type", "label", "values", "matchable"])
+
+
+def ref_genders_command(
+    format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
+) -> None:
+    """List valid Gender enum values.
+
+    Small enum — useful for an agent constructing a Person entity that
+    wants to set `gender` correctly.
+    """
+    values = model["types"].get("gender", {}).get("values", {})
+    entries = [{"name": k, "label": v} for k, v in sorted(values.items())]
+
+    fmt = resolve_format(format_)
+    if fmt == Format.JSON:
+        print_json(entries)
+    elif fmt == Format.JSONL:
+        print_jsonl(entries)
+    else:
+        rows = [[e["name"], e["label"]] for e in entries]
+        print_table(rows, headers=["gender", "label"])
+
+
+def _truncate(text: str, max_len: int) -> str:
+    """Truncate a string with an ellipsis if it exceeds `max_len`."""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
+
+
 # ----- registration -----
 
 
@@ -495,3 +734,15 @@ def register(app: typer.Typer) -> None:
     app.command("fetch")(fetch_command)
     app.command("search")(search_command)
     app.command("match")(match_command)
+
+    ref_app = typer.Typer(
+        name="ref",
+        help="Inspect the bundled FtM model (offline; no API key required).",
+        no_args_is_help=True,
+    )
+    ref_app.command("schemas")(ref_schemas_command)
+    ref_app.command("schema")(ref_schema_command)
+    ref_app.command("topics")(ref_topics_command)
+    ref_app.command("types")(ref_types_command)
+    ref_app.command("genders")(ref_genders_command)
+    app.add_typer(ref_app, name="ref")

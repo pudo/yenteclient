@@ -1,0 +1,134 @@
+"""Tests for the offline ``ref`` introspection subcommands.
+
+These don't hit the network — they read the bundled ``model.json`` — so we
+exercise them directly without ``respx`` mocking.
+"""
+
+import json
+
+import pytest
+from typer.testing import CliRunner
+
+from yente_client.cli.main import app
+
+
+@pytest.fixture
+def runner() -> CliRunner:
+    return CliRunner()
+
+
+# ---------- ref schemas ----------
+
+
+def test_ref_schemas_json_includes_person(runner) -> None:
+    result = runner.invoke(app, ["ref", "schemas", "-f", "json"])
+    assert result.exit_code == 0
+    schemas = json.loads(result.stdout)
+    names = {s["name"] for s in schemas}
+    assert {"Person", "Company", "Email"} <= names
+
+
+def test_ref_schemas_marks_matchable(runner) -> None:
+    result = runner.invoke(app, ["ref", "schemas", "-f", "json"])
+    assert result.exit_code == 0
+    schemas = json.loads(result.stdout)
+    person = next(s for s in schemas if s["name"] == "Person")
+    assert person["matchable"] is True
+
+
+def test_ref_schemas_matchable_filter(runner) -> None:
+    """`--matchable` drops any schema with matchable=False."""
+    full = json.loads(runner.invoke(app, ["ref", "schemas", "-f", "json"]).stdout)
+    filtered = json.loads(
+        runner.invoke(app, ["ref", "schemas", "--matchable", "-f", "json"]).stdout
+    )
+    assert len(filtered) < len(full)
+    assert all(s["matchable"] for s in filtered)
+
+
+def test_ref_schemas_table(runner) -> None:
+    result = runner.invoke(app, ["ref", "schemas", "-f", "table"])
+    assert result.exit_code == 0
+    assert "Person" in result.stdout
+    assert "Company" in result.stdout
+
+
+# ---------- ref schema NAME ----------
+
+
+def test_ref_schema_person_json(runner) -> None:
+    result = runner.invoke(app, ["ref", "schema", "Person", "-f", "json"])
+    assert result.exit_code == 0
+    summary = json.loads(result.stdout)
+    assert summary["name"] == "Person"
+    assert summary["matchable"] is True
+    assert "LegalEntity" in summary["extends"]
+    prop_names = {p["name"] for p in summary["properties"]}
+    # Own properties (Person.*)
+    assert "firstName" in prop_names
+    assert "birthDate" in prop_names
+    # Inherited from LegalEntity:
+    assert "name" in prop_names
+
+
+def test_ref_schema_excludes_stubs(runner) -> None:
+    """Stub (reverse-edge) properties don't show up — matches the codegen."""
+    summary = json.loads(runner.invoke(app, ["ref", "schema", "Person", "-f", "json"]).stdout)
+    prop_names = {p["name"] for p in summary["properties"]}
+    # `images` and `associates` are stub properties on Person.
+    assert "images" not in prop_names
+    assert "associates" not in prop_names
+
+
+def test_ref_schema_marks_deprecated(runner) -> None:
+    summary = json.loads(runner.invoke(app, ["ref", "schema", "Person", "-f", "json"]).stdout)
+    second_name = next(p for p in summary["properties"] if p["name"] == "secondName")
+    assert second_name["deprecated"] is True
+
+
+def test_ref_schema_unknown_exits_two(runner) -> None:
+    result = runner.invoke(app, ["ref", "schema", "NotARealSchema"])
+    assert result.exit_code == 2
+    assert "Unknown schema" in (result.stdout + result.stderr)
+
+
+def test_ref_schema_table(runner) -> None:
+    result = runner.invoke(app, ["ref", "schema", "Person", "-f", "table"])
+    assert result.exit_code == 0
+    assert "Person" in result.stdout
+    assert "firstName" in result.stdout
+
+
+# ---------- ref topics ----------
+
+
+def test_ref_topics_includes_sanction(runner) -> None:
+    result = runner.invoke(app, ["ref", "topics", "-f", "json"])
+    assert result.exit_code == 0
+    topics = json.loads(result.stdout)
+    names = {t["name"] for t in topics}
+    assert "sanction" in names
+    assert "role.pep" in names
+
+
+# ---------- ref types ----------
+
+
+def test_ref_types_includes_name_and_date(runner) -> None:
+    result = runner.invoke(app, ["ref", "types", "-f", "json"])
+    assert result.exit_code == 0
+    types = json.loads(result.stdout)
+    names = {t["name"] for t in types}
+    assert {"name", "address", "date", "country", "topic"} <= names
+
+
+# ---------- ref genders ----------
+
+
+def test_ref_genders(runner) -> None:
+    result = runner.invoke(app, ["ref", "genders", "-f", "json"])
+    assert result.exit_code == 0
+    genders = json.loads(result.stdout)
+    names = {g["name"] for g in genders}
+    assert "male" in names
+    assert "female" in names
