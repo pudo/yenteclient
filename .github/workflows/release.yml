@@ -1,0 +1,215 @@
+name: release
+
+# Triggered by a version tag (vX.Y.Z) pushed to the repo. The expected
+# producer is `bump2version --verbose <part>` from the repo root, which
+# bumps python/pyproject.toml, commits, and tags atomically.
+#
+# Required setup (one-time, on PyPI side):
+# 1. Reserve `yente-client` on https://pypi.org if not already.
+# 2. Configure a Trusted Publisher under the project's "Publishing" page:
+#       owner:    pudo
+#       repo:     yenteclient
+#       workflow: release.yml
+#       env:      pypi
+#    With trusted publishing configured, no PyPI token sits in repo secrets.
+#
+# Job chain: validate → test → build → smoke → publish → release.
+# A failure in any step blocks the publish step from running.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Avoid duplicate runs for force-push retags.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ----- Phase 1: cheap sanity checks before any expensive work -----
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.assert.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Assert tag matches pyproject.version
+        id: assert
+        # Reads `version = "X.Y.Z"` out of python/pyproject.toml and compares
+        # against the tag (stripping the `v` prefix). Refuses to continue on
+        # any mismatch — protects against hand-crafted tags going past the
+        # bump2version path.
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          pyproject_version=$(
+            python -c "import tomllib, pathlib; \
+              print(tomllib.loads(pathlib.Path('python/pyproject.toml').read_text())['project']['version'])"
+          )
+          echo "tag:       $tag_version"
+          echo "pyproject: $pyproject_version"
+          if [ "$tag_version" != "$pyproject_version" ]; then
+            echo "::error::tag $tag_version does not match pyproject.version $pyproject_version"
+            exit 1
+          fi
+          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
+
+  # ----- Phase 2: full offline matrix on the tagged commit -----
+  test:
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package + dev dependencies
+        run: pip install -e python/.[dev]
+
+      - name: ruff check
+        working-directory: python
+        run: ruff check .
+
+      - name: ruff format --check
+        working-directory: python
+        run: ruff format --check .
+
+      - name: mypy --strict
+        working-directory: python
+        run: mypy
+
+      - name: pytest (offline)
+        working-directory: python
+        run: pytest -m "not live"
+
+      - name: regen_model.py --check
+        run: python scripts/regen_model.py --check --skip-fetch
+
+      - name: mkdocs build --strict
+        working-directory: python
+        run: mkdocs build --strict
+
+  # ----- Phase 3: build the wheel + sdist artifact -----
+  build:
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build frontend
+        run: pip install build twine
+
+      - name: Build wheel + sdist
+        working-directory: python
+        run: python -m build
+
+      - name: twine check
+        working-directory: python
+        run: twine check dist/*
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: python/dist/
+          retention-days: 30
+
+  # ----- Phase 4: install the wheel in a clean venv; import + CLI smoke -----
+  smoke:
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install wheel in a clean venv + smoke
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install "dist/yente_client-${VERSION}-py3-none-any.whl[cli]"
+
+          # SDK surface imports cleanly
+          /tmp/smoke/bin/python -c "
+          from yente_client import Client, AsyncClient, Person, Company, MatchFilters
+          from yente_client.exceptions import YenteError, ConfigurationError, APIError
+          print('SDK imports OK')
+          "
+
+          # CLI entry point resolves and runs
+          /tmp/smoke/bin/yente-cli --help > /dev/null
+          /tmp/smoke/bin/yente-cli ref schemas --matchable -f json > /dev/null
+          echo "CLI smoke OK"
+
+  # ----- Phase 5: trusted-publish to PyPI with PEP 740 attestations -----
+  publish:
+    needs: [validate, test, build, smoke]
+    runs-on: ubuntu-latest
+    # `environment: pypi` is the bridge to PyPI's trusted publisher
+    # config; nothing else needed. Don't rename without updating PyPI.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/yente-client/
+    permissions:
+      id-token: write  # OIDC for trusted publishing
+      attestations: write  # PEP 740 attestations
+      contents: write  # creating the GitHub Release entry below
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI (trusted publishing + attestations)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          attestations: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Carve out the [Unreleased] section as release notes if anything's there.
+          notes=$(
+            awk '/^## \[Unreleased\]/{flag=1;next} /^## \[/{flag=0} flag' CHANGELOG.md \
+              || echo "See CHANGELOG.md for details."
+          )
+          gh release create "v${VERSION}" \
+            dist/*.whl dist/*.tar.gz \
+            --title "v${VERSION}" \
+            --notes "$notes"
