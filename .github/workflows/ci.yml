@@ -36,9 +36,27 @@ jobs:
         working-directory: python
         run: mypy
 
-      - name: pytest (offline)
+      - name: pytest (offline, with coverage)
         working-directory: python
-        run: pytest -m "not live"
+        run: pytest -m "not live" --cov=yente_client --cov-report=xml --cov-report=term
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: python/coverage.xml
+          retention-days: 30
+
+      - name: pip-audit (dependency CVE scan)
+        if: matrix.python-version == '3.12'
+        working-directory: python
+        # Soft-fail: surfaces advisories without blocking the build today.
+        # Dependabot handles the upgrade PRs separately. Once we trust the
+        # signal, drop `|| true` to enforce.
+        run: |
+          pip install pip-audit
+          pip-audit --strict || true
 
       - name: regen_model.py --check (drift detector)
         run: python scripts/regen_model.py --check --skip-fetch
