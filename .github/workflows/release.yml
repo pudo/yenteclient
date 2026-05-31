@@ -7,8 +7,8 @@ name: release
 # Required setup (one-time, on PyPI side):
 # 1. Reserve `yente-client` on https://pypi.org if not already.
 # 2. Configure a Trusted Publisher under the project's "Publishing" page:
-#       owner:    pudo
-#       repo:     yenteclient
+#       owner:    opensanctions
+#       repo:     yente-client
 #       workflow: release.yml
 #       env:      pypi
 #    With trusted publishing configured, no PyPI token sits in repo secrets.

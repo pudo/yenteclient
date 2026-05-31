@@ -29,9 +29,15 @@ SKIP_TAG = "[skip changelog]"
 
 
 def _changed_files(base: str, head: str) -> list[str]:
-    """Return the list of files changed between ``base`` and ``head``."""
+    """Return the list of files changed between ``base`` and ``head``.
+
+    Uses ``git diff base head`` (two-tree compare), not ``base...head``
+    (merge-base form). Two-tree compare needs both commits accessible
+    but not the history between them — works on a shallow checkout
+    where only the two SHAs were fetched.
+    """
     result = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...{head}"],
+        ["git", "diff", "--name-only", base, head],
         check=True,
         capture_output=True,
         text=True,

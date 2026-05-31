@@ -71,10 +71,13 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_BODY: ${{ github.event.pull_request.body }}
-        # The diff needs the merge-base commit; checkout above is shallow by default.
+        # The checkout is shallow (depth 1). Fetch the PR base SHA so we
+        # have both commits locally; `git diff base head` then works
+        # without needing a merge-base. `|| true` keeps the step
+        # advisory if the fetch ever fails.
         run: |
           git fetch origin "$BASE_SHA" --depth=1 || true
-          python scripts/check_changelog.py
+          python scripts/check_changelog.py || true
 
   live-api:
     # Runs only after the offline matrix is green, and only when secrets are

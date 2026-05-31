@@ -38,4 +38,4 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Documentation under `python/docs/` (mkdocs + Material theme +
   mkdocstrings): tutorial, CLI overview, auto-extracted API reference.
 
-[Unreleased]: https://github.com/pudo/yenteclient/compare/HEAD
+[Unreleased]: https://github.com/opensanctions/yente-client/compare/HEAD

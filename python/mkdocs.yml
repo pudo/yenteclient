@@ -1,8 +1,8 @@
 site_name: yente-client
 site_description: Python SDK and CLI for the yente / OpenSanctions matching API
 site_url: https://yenteclient.example/  # placeholder; we don't host yet
-repo_url: https://github.com/pudo/yenteclient
-repo_name: pudo/yenteclient
+repo_url: https://github.com/opensanctions/yente-client
+repo_name: opensanctions/yente-client
 edit_uri: edit/main/python/docs/
 
 docs_dir: docs

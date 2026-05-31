@@ -58,8 +58,8 @@ dev = [
 yente-cli = "yente_client.cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/pudo/yenteclient"
-Repository = "https://github.com/pudo/yenteclient"
+Homepage = "https://github.com/opensanctions/yente-client"
+Repository = "https://github.com/opensanctions/yente-client"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/yente_client"]
