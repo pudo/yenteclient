@@ -420,7 +420,7 @@ class Client:
 
 - **Transport:** `httpx.Client` / `AsyncClient` with `follow_redirects=True`. The `308` on `/entities/{referent}` → `/entities/{canonical}` is followed transparently.
 - **Timeout:** default `httpx.Timeout(30.0, connect=10.0)`; overridable via `timeout=`.
-- **Retries:** **deferred past M2.** Transient failures (429, 5xx, network errors) bubble up as `APIError` / `TransportError` for users to handle. We'll add a `RetryPolicy` + `retry=` kwarg when there's a concrete need (probably alongside `match_many` / `match_iter` in M4, where it matters most). httpx's connection-level transport retries (`HTTPTransport(retries=2)`) stay on, so DNS / connection-refused failures already get a free retry.
+- **Retries:** **deferred past M2.** Transient failures (429, 5xx, network errors) bubble up as `APIError` / `TransportError` for users to handle. We'll add a `RetryPolicy` + `retry=` kwarg when there's a concrete need (probably alongside `match_many` / `match_iter` in M5, where it matters most). httpx's connection-level transport retries (`HTTPTransport(retries=2)`) stay on, so DNS / connection-refused failures already get a free retry.
 - **Auth header:** when `api_key` is set, attach `Authorization: ApiKey {key}` to every request. When missing and `base_url` points at `api.opensanctions.org`, emit `warnings.warn` once — not an exception (self-hosted setups don't need keys).
 - **User-Agent:** RFC-7231 bracket-comment form. The product is always `yente-client/{ver}`; caller's `app_name` and runtime versions sit in the parenthesised comment:
   - No `app_name`: `yente-client/0.0.1 (python/3.12.5; httpx/0.28.1)`
@@ -665,15 +665,17 @@ Notes:
 1. **Python codegen pipeline + entity classes + literal types** — `scripts/regen_model.py`, Python Jinja templates, committed `model/model.json`, generated `python/src/yente_client/entities/_generated.py` and `schemas/_literals.py`. CI `--check`. No HTTP client yet. End: `from yente_client.entities import Person` is importable; `mypy --strict` passes on the generated module; `regen --check` is idempotent. See the dedicated M1 plan in `plans/2026-05-29-m1-python-codegen.md` for the breakdown.
 2. **Python sync Client + response models + errors + tests** — covers `match` (v2-shaped surface, v1 wire), `search`, `fetch`, `adjacent`, `catalog`, `algorithms`, `healthz`, `readyz`. Builds on M1's generated entities and bundled model. No async, no CLI. End: `yente-client` installable from source; tests pass against fixtures.
 3. **AsyncClient** — parity with `Client`, reusing the request-builder layer.
-4. **`match_many` / `match_iter`** — client-side fan-out, threaded + async, with bounded concurrency and `on_error` policy. SDK-level only at this stage.
-5. **CLI v1** — `search`, `match`, `fetch`, `catalog`, `algorithms`. JSON / JSONL / table formatters. Config precedence + env var handling.
+4. **CLI MVP** — `yente-client search` / `match` / `fetch` / `catalog` / `algorithms`. JSON / JSONL / table formatters. Config precedence + env var handling. Single-call only — bulk workflows wait for the fan-out kernel in M5. End: a working CLI that drives the existing Client end-to-end.
+5. **`match_many` / `match_iter`** — client-side fan-out, threaded + async, with bounded concurrency and `on_error` policy. SDK-level only at this stage; the CLI gets its bulk command in M7.
 6. **TypeScript SDK v1** — `Client` + models + errors + entities. Native fetch. zod-based response validation. Extends the regen pipeline with TS Jinja templates so both languages stay model-locked.
-7. **First publish** — PyPI + npm 0.1.0, README quickstarts, GitHub Actions release on tag.
-8. **`yente-client screen` CLI** — threaded CSV screening, resumable, on top of `match_iter`.
+7. **`yente-client screen` CLI** — threaded CSV screening, resumable, built on `match_iter` (M5). Bulk-workflow surface that turns the SDK into a useful command-line screening tool.
+8. **First publish** — PyPI + npm 0.1.0, README quickstarts, GitHub Actions release on tag. Pushed back from earlier to keep the first release feature-complete (CLI single + bulk + TS).
 9. **Coverage gaps** — `/reconcile/*`, `/statements`, `/updatez`. Added as separate methods; no API redesign needed.
 10. **`/v2/match` cut-over** — when the server ships v2, rewrite the call layer in `_http.py` only. Public API unchanged; users get strict 400 errors and dataset DSL for free.
 
-Stop and check in at the end of each milestone. Especially before publishing (step 7) — that's a one-way door.
+**Sequencing rationale:** the CLI MVP (M4) precedes the fan-out kernel (M5) so we get a user-facing command-line tool early, and `match_many` / `match_iter` are designed with a known concrete consumer (`yente-client screen` in M7). Publishing waits until both the single-call and bulk CLI exist so first-impression users don't see an obviously incomplete tool.
+
+Stop and check in at the end of each milestone. Especially before publishing (step 8) — that's a one-way door.
 
 ## 10. Open questions to revisit
 
