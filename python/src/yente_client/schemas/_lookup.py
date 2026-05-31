@@ -38,6 +38,27 @@ def iter_properties(schema: str) -> Iterator[str]:
                 yield prop
 
 
+def is_matchable_schema(schema: str) -> bool:
+    """Return True if ``schema`` can be used as a `/match` query target.
+
+    Non-matchable schemata (e.g. ``Document``, ``Article``, abstract
+    parents like ``Thing``) cause yente to raise ``TypeError`` at query
+    construction; the SDK refuses such queries client-side rather than
+    let the server reject them. See ``yente/data/entity.py:42``.
+    """
+    if not has_schema(schema):
+        raise KeyError(schema)
+    return bool(model["schemata"][schema].get("matchable", False))
+
+
+def matchable_schemata() -> list[str]:
+    """Return every schema name with ``matchable: true`` in the model.
+
+    Sorted alphabetically for stable error messages.
+    """
+    return sorted(n for n, d in model["schemata"].items() if d.get("matchable"))
+
+
 def is_a(schema: str, ancestor: str) -> bool:
     """Return True if ``schema`` extends ``ancestor`` transitively.
 

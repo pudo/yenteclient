@@ -18,6 +18,7 @@ from yente_client._translation import (
     serialise_search_filters,
     unwrap_match_response,
 )
+from yente_client.client import _check_matchable_schema
 from yente_client.entities import EntityInput
 from yente_client.exceptions import TransportError
 from yente_client.filters import MatchFilters, SearchFilters
@@ -234,6 +235,7 @@ class AsyncClient:
         **filter_kwargs: Any,
     ) -> MatchResponse:
         """Async equivalent of :meth:`yente_client.client.Client.match`."""
+        _check_matchable_schema(entity)
         f = merge_filters(MatchFilters, filters, filter_kwargs)
         dataset, params = serialise_match_filters(f)
 

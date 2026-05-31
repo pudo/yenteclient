@@ -196,3 +196,37 @@ def test_match_changed_since_passed_through(make_client, load_fixture) -> None:
 
 def test_best_algorithm_constant_is_best() -> None:
     assert BEST_ALGORITHM == "best"
+
+
+# ---------- non-matchable schema check ----------
+
+
+def test_match_non_matchable_schema_raises_before_http(make_client, load_fixture) -> None:
+    """A non-matchable schema (e.g. Document) is refused client-side; no HTTP call goes out."""
+    import pytest
+
+    from yente_client.entities import Document
+    from yente_client.exceptions import ConfigurationError
+
+    handler, seen = _record_request(load_fixture("match_zero_results"))
+    with make_client(handler=handler) as c, pytest.raises(ConfigurationError) as exc_info:
+        c.match(Document(fileName="foo.pdf"))
+    # No HTTP request was sent.
+    assert seen == []
+    # Error message points at the discovery path.
+    assert "ref schemas --matchable" in str(exc_info.value)
+    assert "Document" in str(exc_info.value)
+
+
+async def test_async_match_non_matchable_schema_raises(make_async_client, load_fixture) -> None:
+    import pytest
+
+    from yente_client.entities import Document
+    from yente_client.exceptions import ConfigurationError
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("HTTP must not be called for non-matchable schema")
+
+    async with make_async_client(handler=handler) as c:
+        with pytest.raises(ConfigurationError):
+            await c.match(Document(fileName="foo.pdf"))

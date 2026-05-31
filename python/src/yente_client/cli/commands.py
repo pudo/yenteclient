@@ -35,7 +35,13 @@ from yente_client.exceptions import (
     YenteError,
 )
 from yente_client.models import Dataset, Entity
-from yente_client.schemas import has_schema, iter_properties, model
+from yente_client.schemas import (
+    has_schema,
+    is_matchable_schema,
+    iter_properties,
+    matchable_schemata,
+    model,
+)
 
 _FORMAT_HELP = "Output format. `auto` (default) renders a table on a TTY and JSON when piped."
 
@@ -676,6 +682,16 @@ def _build_entity_input(schema: str, properties: list[str], from_file: Path | No
         )
         raise typer.Exit(code=2)
 
+    if not is_matchable_schema(schema):
+        options = ", ".join(matchable_schemata()[:6])
+        typer.echo(
+            f"error: Schema {schema!r} is not a matchable target for `match`. "
+            f"Try a matchable schema like {options}, … "
+            f"(run `yente-cli ref schemas --matchable` for the full list).",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
     props: dict[str, list[str]] = {}
     if from_file is not None:
         try:
@@ -827,6 +843,7 @@ def ref_schema_command(
             [
                 p["name"],
                 p["type"],
+                "✓" if p["directly_scored"] else "",
                 "deprecated" if p["deprecated"] else "",
                 _truncate(p["description"], 50),
             ]
@@ -834,9 +851,17 @@ def ref_schema_command(
         ]
         print_table(
             rows,
-            headers=["property", "type", "flags", "description"],
+            headers=["property", "type", "scored", "flags", "description"],
             title=f"{len(properties)} property/properties (own + inherited)",
         )
+        typer.echo("")
+        typer.echo("`scored` = directly contributes a match score. Other properties")
+        typer.echo("can still affect results indirectly:")
+        typer.echo("  - name parts (firstName, middleName, lastName, fatherName, ...) get")
+        typer.echo("    folded into the synthesized `name` value")
+        typer.echo("  - weakAlias / abbreviation are cross-compared against candidate names")
+        typer.echo("  - gender acts as a mismatch penalty (lower score on disagreement)")
+        typer.echo("Sending non-`scored` properties is fine — and often helpful.")
 
 
 def _collect_schema_properties(name: str) -> list[dict[str, Any]]:
@@ -845,8 +870,14 @@ def _collect_schema_properties(name: str) -> list[dict[str, Any]]:
     Mirrors ``scripts/regen_model.py``'s ``collect_properties`` shape so the
     `ref schema` view matches what the codegen would generate. Stub
     properties (reverse edges) are excluded — they're navigation-only.
+
+    The ``directly_scored`` field resolves the property's effective
+    matchability: ``prop.matchable`` when set, else the property's
+    ``type.matchable`` default. See ``yente_matchable_flag`` for why this
+    is not the same as "useful in matching".
     """
     schemata = model["schemata"]
+    types = model.get("types", {})
     seen: set[str] = set()
     rows: list[dict[str, Any]] = []
     for ancestor in schemata[name].get("schemata", [name]):
@@ -855,6 +886,10 @@ def _collect_schema_properties(name: str) -> list[dict[str, Any]]:
             if prop_name in seen or prop_def.get("stub"):
                 continue
             seen.add(prop_name)
+            prop_matchable = prop_def.get("matchable")
+            if prop_matchable is None:
+                type_def = types.get(prop_def.get("type", ""), {})
+                prop_matchable = type_def.get("matchable")
             rows.append(
                 {
                     "name": prop_name,
@@ -862,6 +897,7 @@ def _collect_schema_properties(name: str) -> list[dict[str, Any]]:
                     "label": prop_def.get("label", ""),
                     "description": (prop_def.get("description") or "").strip(),
                     "deprecated": bool(prop_def.get("deprecated", False)),
+                    "directly_scored": bool(prop_matchable),
                     "from_schema": ancestor,
                 }
             )
@@ -1090,8 +1126,17 @@ EXAMPLES:
 OUTPUT (with -f json):
   {name, label, description, matchable, abstract, extends, schemata,
    featured, required, properties: [{name, type, label, description,
-   deprecated, from_schema}, ...]}
+   deprecated, directly_scored, from_schema}, ...]}
 
 The property list is flat (own + inherited), excluding stub
 (reverse-edge) properties that aren't user-settable.
+
+`directly_scored` (also shown as the `scored` column in the table
+view) marks properties that contribute to a match score as a primary
+matching feature. Properties WITHOUT this flag can still meaningfully
+impact match results: name parts (firstName, lastName, ...) feed into
+a synthesized `name`; weakAlias / abbreviation are cross-compared
+against candidate names; gender acts as a mismatch penalty. Sending
+non-`directly_scored` properties is generally fine — the flag is "is
+this a primary scoring input?", not "is this useful?".
 """

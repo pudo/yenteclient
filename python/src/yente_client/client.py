@@ -13,7 +13,7 @@ from yente_client._translation import (
     unwrap_match_response,
 )
 from yente_client.entities import EntityInput
-from yente_client.exceptions import TransportError
+from yente_client.exceptions import ConfigurationError, TransportError
 from yente_client.filters import MatchFilters, SearchFilters
 from yente_client.models import (
     AdjacentPropertyResponse,
@@ -25,11 +25,25 @@ from yente_client.models import (
     SearchResponse,
     StatusResponse,
 )
+from yente_client.schemas import is_matchable_schema, matchable_schemata
 
 BEST_ALGORITHM: Final[str] = "best"
 """Canonical algorithm name resolving to whichever scoring algorithm the
 server currently recommends. Stable across algorithm version bumps — pass
 ``algorithm=BEST_ALGORITHM`` for forward-compatibility."""
+
+
+def _check_matchable_schema(entity: EntityInput) -> None:
+    """Raise :class:`ConfigurationError` if ``entity``'s schema can't be matched."""
+    schema_name = entity.schema_
+    if is_matchable_schema(schema_name):
+        return
+    options = ", ".join(matchable_schemata()[:6]) + ", …"
+    raise ConfigurationError(
+        f"Schema {schema_name!r} is not a matchable target for /match. "
+        f"Use a matchable schema like {options} "
+        f"(run `yente-cli ref schemas --matchable` for the full list)."
+    )
 
 
 class Client:
@@ -267,7 +281,14 @@ class Client:
             algorithm: Server-side algorithm name. Common values: ``"best"``
                 (use ``BEST_ALGORITHM``), ``"logic-v2"``, ``"name-matcher"``.
                 The full set is dynamic via :meth:`algorithms`.
+
+        Raises:
+            ConfigurationError: ``entity``'s schema is not a matchable
+                target (e.g. ``Document``, ``Article``). Yente would reject
+                the query with a 4xx; we refuse client-side to give a
+                clearer error and save the round-trip.
         """
+        _check_matchable_schema(entity)
         f = merge_filters(MatchFilters, filters, filter_kwargs)
         dataset, params = serialise_match_filters(f)
 

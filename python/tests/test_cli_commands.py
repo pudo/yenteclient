@@ -382,6 +382,15 @@ def test_match_unknown_schema_exits_two(runner) -> None:
     assert "Unknown schema" in (result.stdout + result.stderr)
 
 
+def test_match_non_matchable_schema_exits_two(runner) -> None:
+    """Schemas with `matchable: false` (e.g. Document) are refused before any HTTP call."""
+    result = runner.invoke(app, [*_BASE_FLAGS, "match", "-s", "Document", "-p", "fileName=foo"])
+    assert result.exit_code == 2
+    output = result.stdout + result.stderr
+    assert "not a matchable target" in output
+    assert "ref schemas --matchable" in output
+
+
 def test_match_fuzzy_suggests_schema(runner) -> None:
     """Typos in --schema get a 'Did you mean?' hint pointing at the closest valid name."""
     result = runner.invoke(app, [*_BASE_FLAGS, "match", "-s", "Persn", "-p", "firstName=X"])

@@ -5,6 +5,22 @@ plain dict. Use the helpers for the common membership / inheritance /
 deprecation checks; navigate ``model`` directly for anything richer.
 """
 
-from yente_client.schemas._lookup import has_schema, is_a, is_deprecated, iter_properties, model
+from yente_client.schemas._lookup import (
+    has_schema,
+    is_a,
+    is_deprecated,
+    is_matchable_schema,
+    iter_properties,
+    matchable_schemata,
+    model,
+)
 
-__all__ = ["has_schema", "is_a", "is_deprecated", "iter_properties", "model"]
+__all__ = [
+    "has_schema",
+    "is_a",
+    "is_deprecated",
+    "is_matchable_schema",
+    "iter_properties",
+    "matchable_schemata",
+    "model",
+]
