@@ -11,7 +11,26 @@ from yente_client.cli.config import _DEFAULT_BASE_URL, CliConfig
 
 app = typer.Typer(
     name="yente-client",
-    help="OpenSanctions / yente API client.",
+    help=(
+        "OpenSanctions / yente API client.\n"
+        "\n"
+        "WORKFLOWS:\n"
+        "  Screen a known entity (KYC/sanctions):  match -s Person -p firstName=… -p lastName=…\n"
+        "  Free-text discovery by name:            search 'acme' -d default\n"
+        "  Fetch one entity by ID:                 fetch <id>\n"
+        "  Discover the data model (offline):      ref schemas, ref schema Person\n"
+        "  Discover the server:                    catalog, algorithms\n"
+        "\n"
+        "PICK A COMMAND:\n"
+        "  Have a full entity (name+dob+country)? → match\n"
+        "  Have a name to look up?                → search\n"
+        "  Have an ID already?                    → fetch\n"
+        "  Not sure what's queryable?             → ref schemas\n"
+        "  What datasets / algorithms exist?      → catalog, algorithms\n"
+        "\n"
+        "ENV: OPENSANCTIONS_API_KEY (auth), YENTE_BASE_URL (override target).\n"
+        "Use -f json (or jsonl) for machine-readable / LLM-friendly output."
+    ),
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
     add_completion=False,

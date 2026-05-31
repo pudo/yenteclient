@@ -305,6 +305,23 @@ def test_match_unknown_schema_exits_two(runner) -> None:
     assert "Unknown schema" in (result.stdout + result.stderr)
 
 
+def test_match_fuzzy_suggests_schema(runner) -> None:
+    """Typos in --schema get a 'Did you mean?' hint pointing at the closest valid name."""
+    result = runner.invoke(app, [*_BASE_FLAGS, "match", "-s", "Persn", "-p", "firstName=X"])
+    assert result.exit_code == 2
+    output = result.stdout + result.stderr
+    assert "Unknown schema" in output
+    assert "Person" in output  # suggested via difflib
+
+
+def test_match_fuzzy_suggests_property(runner) -> None:
+    """Typos in -p KEY get a 'did you mean?' hint on the closest property."""
+    result = runner.invoke(app, [*_BASE_FLAGS, "match", "-s", "Person", "-p", "frstName=X"])
+    assert result.exit_code == 2
+    output = result.stdout + result.stderr
+    assert "firstName" in output  # suggested by _suggest_property
+
+
 def test_match_unknown_property_exits_two(runner) -> None:
     result = runner.invoke(
         app,

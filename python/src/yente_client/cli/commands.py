@@ -5,7 +5,10 @@ translation, and HTTP details live in :mod:`yente_client.client`. This
 module's job is argument-parsing + output formatting.
 """
 
+import contextlib
+import difflib
 import json
+from collections.abc import Iterator
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast
@@ -22,11 +25,80 @@ from yente_client.cli.output import (
     print_table,
     resolve_format,
 )
+from yente_client.client import Client
 from yente_client.entities import EntityInput
+from yente_client.exceptions import (
+    APIError,
+    ConfigurationError,
+    TransportError,
+    YenteError,
+)
 from yente_client.models import Entity
-from yente_client.schemas import has_schema, model
+from yente_client.schemas import has_schema, iter_properties, model
 
 _FORMAT_HELP = "Output format. `auto` (default) renders a table on a TTY and JSON when piped."
+
+
+# ----- error handling + suggestions -----
+
+
+def _exit_code_for(exc: YenteError) -> int:
+    """Map a ``YenteError`` to the CLI exit code per §5.4."""
+    if isinstance(exc, TransportError):
+        return 4
+    if isinstance(exc, (APIError, ConfigurationError)):
+        return 3
+    return 3
+
+
+def _emit_yente_error(ctx: typer.Context, exc: YenteError) -> None:
+    """Render a YenteError as a clean one-line message to stderr.
+
+    ``-v`` / ``--verbose`` (read from ``ctx.obj.verbose``) shows the full
+    chain via the active Python traceback handler instead.
+    """
+    config: CliConfig | None = ctx.obj if isinstance(ctx.obj, CliConfig) else None
+    if config and config.verbose:
+        raise exc
+    if isinstance(exc, APIError):
+        typer.echo(f"error: {type(exc).__name__} ({exc.status_code}): {exc.detail}", err=True)
+    else:
+        typer.echo(f"error: {type(exc).__name__}: {exc}", err=True)
+
+
+@contextlib.contextmanager
+def _with_client(ctx: typer.Context) -> Iterator[Client]:
+    """Context manager that builds a Client and converts SDK errors to clean exits.
+
+    Wraps each endpoint command. ``YenteError`` subclasses are rendered as a
+    one-line stderr message and re-raised as ``typer.Exit`` with the right
+    exit code. ``-v`` / ``--verbose`` short-circuits to the original
+    traceback for debugging.
+    """
+    config: CliConfig = ctx.obj
+    try:
+        with config.make_client() as client:
+            yield client
+    except YenteError as exc:
+        _emit_yente_error(ctx, exc)
+        raise typer.Exit(code=_exit_code_for(exc)) from exc
+
+
+def _suggest_schema(name: str) -> str | None:
+    """Return the closest valid FtM schema name, or ``None`` if no close match."""
+    valid = list(model["schemata"].keys())
+    matches = difflib.get_close_matches(name, valid, n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
+def _suggest_property(schema: str, prop_name: str) -> str | None:
+    """Return the closest valid property name for ``schema``, or ``None``."""
+    try:
+        valid = list(iter_properties(schema))
+    except KeyError:
+        return None
+    matches = difflib.get_close_matches(prop_name, valid, n=1, cutoff=0.6)
+    return matches[0] if matches else None
 
 
 # ----- version -----
@@ -73,8 +145,7 @@ def healthz_command(
     Kubernetes liveness probes. See ``readyz`` for index readiness, which can
     fail independently.
     """
-    config: CliConfig = ctx.obj
-    with config.make_client() as client:
+    with _with_client(ctx) as client:
         result = client.healthz()
     if resolve_format(format_) in (Format.JSON, Format.JSONL):
         print_json(result)
@@ -90,8 +161,7 @@ def readyz_command(
 
     Returns 503 (mapped to a ``ServerError`` exit) until the index has loaded.
     """
-    config: CliConfig = ctx.obj
-    with config.make_client() as client:
+    with _with_client(ctx) as client:
         result = client.readyz()
     if resolve_format(format_) in (Format.JSON, Format.JSONL):
         print_json(result)
@@ -114,8 +184,7 @@ def catalog_command(
     Use this to discover what dataset names you can pass to ``-d`` /
     ``--datasets`` on ``search`` / ``match``.
     """
-    config: CliConfig = ctx.obj
-    with config.make_client() as client:
+    with _with_client(ctx) as client:
         catalog = client.catalog()
 
     datasets = catalog.datasets
@@ -152,8 +221,7 @@ def algorithms_command(
     ``best`` is the server's canonical default — passing ``-a best`` is stable
     across algorithm version bumps.
     """
-    config: CliConfig = ctx.obj
-    with config.make_client() as client:
+    with _with_client(ctx) as client:
         algorithms = client.algorithms()
 
     fmt = resolve_format(format_)
@@ -192,8 +260,7 @@ def fetch_command(
     of a canonical entity. The default (with ``nested=true``) returns related
     entities inline; pass ``--no-nested`` for a lighter response.
     """
-    config: CliConfig = ctx.obj
-    with config.make_client() as client:
+    with _with_client(ctx) as client:
         entity = client.fetch(entity_id, nested=not no_nested)
 
     fmt = resolve_format(format_)
@@ -247,8 +314,6 @@ def search_command(
     Exits 1 (no results) when the query returns zero hits, so shell scripts
     can gate on `yente-client search … && …`.
     """
-    config: CliConfig = ctx.obj
-
     search_kwargs: dict[str, Any] = {}
     if datasets:
         search_kwargs["datasets"] = datasets
@@ -261,7 +326,7 @@ def search_command(
     if filter_:
         search_kwargs["filter"] = filter_
 
-    with config.make_client() as client:
+    with _with_client(ctx) as client:
         response = client.search(
             q,
             limit=limit,
@@ -383,7 +448,6 @@ def match_command(
     Exits 1 if no results returned, so shell scripts can gate on
     `yente-client match … && …`.
     """
-    config: CliConfig = ctx.obj
     entity = _build_entity_input(schema, properties or [], from_file)
 
     match_kwargs: dict[str, Any] = {}
@@ -398,7 +462,7 @@ def match_command(
     if exclude_schemata:
         match_kwargs["exclude_schemata"] = exclude_schemata
 
-    with config.make_client() as client:
+    with _with_client(ctx) as client:
         response = client.match(
             entity,
             threshold=threshold,
@@ -449,8 +513,10 @@ def _build_entity_input(schema: str, properties: list[str], from_file: Path | No
     """
     schema_cls = getattr(entities, schema, None)
     if schema_cls is None or not isinstance(schema_cls, type):
+        suggestion = _suggest_schema(schema)
+        hint = f" Did you mean: {suggestion}?" if suggestion else ""
         typer.echo(
-            f"error: Unknown schema {schema!r}. Run `yente-client ref schemas` for the list.",
+            f"error: Unknown schema {schema!r}.{hint} Run `yente-client ref schemas` for the list.",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -479,7 +545,17 @@ def _build_entity_input(schema: str, properties: list[str], from_file: Path | No
     try:
         return cast(EntityInput, schema_cls(**props))
     except ValidationError as exc:
-        typer.echo(f"error: invalid {schema} entity: {exc}", err=True)
+        # If any error is a known-extra-fields-forbidden case, try to suggest
+        # the closest valid property name for the agent reading the message.
+        suggestions: list[str] = []
+        for err in exc.errors():
+            if err.get("type") == "extra_forbidden" and err.get("loc"):
+                bad_prop = str(err["loc"][0])
+                close = _suggest_property(schema, bad_prop)
+                if close:
+                    suggestions.append(f"{bad_prop!r} → did you mean {close!r}?")
+        tail = " " + "; ".join(suggestions) if suggestions else ""
+        typer.echo(f"error: invalid {schema} entity: {exc}.{tail}", err=True)
         raise typer.Exit(code=2) from exc
 
 
@@ -552,8 +628,10 @@ def ref_schema_command(
     property type and `deprecated` flags.
     """
     if not has_schema(name):
+        suggestion = _suggest_schema(name)
+        hint = f" Did you mean: {suggestion}?" if suggestion else ""
         typer.echo(
-            f"error: Unknown schema {name!r}. Run `yente-client ref schemas` for the list.",
+            f"error: Unknown schema {name!r}.{hint} Run `yente-client ref schemas` for the list.",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -727,22 +805,143 @@ def _truncate(text: str, max_len: int) -> str:
 def register(app: typer.Typer) -> None:
     """Attach all subcommands to ``app``."""
     app.command("version", help="Print client + bundled FtM model version.")(version_command)
-    app.command("healthz")(healthz_command)
-    app.command("readyz")(readyz_command)
-    app.command("catalog")(catalog_command)
-    app.command("algorithms")(algorithms_command)
-    app.command("fetch")(fetch_command)
-    app.command("search")(search_command)
-    app.command("match")(match_command)
+    app.command("healthz", epilog=_HEALTHZ_EPILOG)(healthz_command)
+    app.command("readyz", epilog=_HEALTHZ_EPILOG)(readyz_command)
+    app.command("catalog", epilog=_CATALOG_EPILOG)(catalog_command)
+    app.command("algorithms", epilog=_ALGORITHMS_EPILOG)(algorithms_command)
+    app.command("fetch", epilog=_FETCH_EPILOG)(fetch_command)
+    app.command("search", epilog=_SEARCH_EPILOG)(search_command)
+    app.command("match", epilog=_MATCH_EPILOG)(match_command)
 
     ref_app = typer.Typer(
         name="ref",
         help="Inspect the bundled FtM model (offline; no API key required).",
         no_args_is_help=True,
     )
-    ref_app.command("schemas")(ref_schemas_command)
-    ref_app.command("schema")(ref_schema_command)
+    ref_app.command("schemas", epilog=_REF_SCHEMAS_EPILOG)(ref_schemas_command)
+    ref_app.command("schema", epilog=_REF_SCHEMA_EPILOG)(ref_schema_command)
     ref_app.command("topics")(ref_topics_command)
     ref_app.command("types")(ref_types_command)
     ref_app.command("genders")(ref_genders_command)
     app.add_typer(ref_app, name="ref")
+
+
+# ----- epilogs (worked examples + output shape notes for agent use) -----
+
+_HEALTHZ_EPILOG = """\
+OUTPUT: a `{status: 'ok'}` object on success. The server returns 503
+(mapped to a ServerError exit, code 3) when the index isn't ready.
+"""
+
+_CATALOG_EPILOG = """\
+EXAMPLES:
+  yente-client catalog                       # human-readable table
+  yente-client catalog -f json               # full CatalogResponse as JSON
+  yente-client catalog --current-only        # skip stale-index datasets
+
+OUTPUT (with -f json):
+  {datasets: [{name, title, version, index_current}, ...],
+   current: [str], outdated: [str], index_stale: bool}
+
+The `name` field is what you pass to `-d` / `--datasets` on match/search.
+"""
+
+_ALGORITHMS_EPILOG = """\
+EXAMPLES:
+  yente-client algorithms
+  yente-client algorithms -f json
+
+OUTPUT (with -f json):
+  {algorithms: [{name, description, docs}], default: str, best: str}
+
+Pass `best` to `match -a best` for the server's recommended algorithm —
+stable across version bumps.
+"""
+
+_FETCH_EPILOG = """\
+EXAMPLES:
+  yente-client fetch NK-aU5ybkbRFJucf8YMwsJvDw                # summary table
+  yente-client fetch <id> -f json                              # full Entity as JSON
+  yente-client fetch <id> --no-nested                          # skip adjacent entities
+
+OUTPUT (with -f json):
+  Entity object: {id, caption, schema, properties: {<name>: [...]}, datasets,
+                  referents, target, first_seen, last_seen, last_change}
+
+Property values are always lists. With nested=true (default), entity-valued
+properties (sanctions, ownerships, family, ...) inline as nested Entity objects.
+"""
+
+_SEARCH_EPILOG = """\
+EXAMPLES:
+  yente-client search "acme"                                            # default dataset
+  yente-client search "acme" -d default -s Company                      # type filter
+  yente-client search "vladimir putin" -d sanctions -t sanction -l 5
+  yente-client search "x" -d default --filter properties.birthDate:1965 -f json
+
+OUTPUT (with -f json):
+  SearchResponse: {results: [Entity, ...], facets: {...}, total: {value, relation},
+                   limit, offset}
+
+EXIT CODES:
+  0  ≥1 result
+  1  zero results
+  3  API error (4xx, 5xx)
+  4  network/transport error
+
+Use `match` instead when you have a known entity (name + dob + country)
+and want to screen it against risk lists.
+"""
+
+_MATCH_EPILOG = """\
+EXAMPLES:
+  yente-client match -s Person -p firstName=Aleksandr -p lastName=Zacharov -d sanctions
+  yente-client match -s Company -p name="Acme LLC" -p jurisdiction=us -d default
+  yente-client match -s Person -p firstName=X -p firstName=Alexander -d sanctions   # multi-value
+  yente-client match -s Person -i query.json -d sanctions -a best                    # from JSON
+  yente-client match -s Person -p name=Putin -d sanctions -f jsonl     # LLM-friendly
+
+PROPERTY NAMES:
+  Run `yente-client ref schema Person` (or Company, Vessel, ...) to see what
+  properties a schema accepts. Names are FtM camelCase: `firstName`, `birthDate`,
+  `lastName`, `country`, `nationality` — not snake_case.
+
+OUTPUT (with -f json):
+  MatchResponse: {query: {...}, results: [ScoredEntity, ...], total, limit}
+  Each ScoredEntity: {id, caption, schema, score (0-1), match (bool),
+                      properties: {...}, datasets, target, explanations: {...}}
+
+EXIT CODES:
+  0  ≥1 result returned (may not have crossed threshold; check .match)
+  1  zero results
+  2  usage error (unknown schema, bad property, malformed -p)
+  3  API error
+  4  network/transport error
+
+Use `search` instead for free-text discovery by name.
+"""
+
+_REF_SCHEMAS_EPILOG = """\
+EXAMPLES:
+  yente-client ref schemas                       # all schemas
+  yente-client ref schemas --matchable           # only what you can `match` against
+  yente-client ref schemas -f json               # for LLM consumption
+
+For details on one schema (properties, types, deprecation flags):
+  yente-client ref schema Person
+"""
+
+_REF_SCHEMA_EPILOG = """\
+EXAMPLES:
+  yente-client ref schema Person
+  yente-client ref schema Company -f json        # full LLM-friendly summary
+  yente-client ref schema Sanction -f jsonl      # one property per line
+
+OUTPUT (with -f json):
+  {name, label, description, matchable, abstract, extends, schemata,
+   featured, required, properties: [{name, type, label, description,
+   deprecated, from_schema}, ...]}
+
+The property list is flat (own + inherited), excluding stub
+(reverse-edge) properties that aren't user-settable.
+"""
