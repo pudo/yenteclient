@@ -6,10 +6,12 @@ and the hosted [OpenSanctions](https://www.opensanctions.org) API.
 ## Install
 
 ```bash
-pip install yente-client
+pip install yente-client            # SDK only
+pip install yente-client[cli]       # SDK + `yente-client` command-line tool
 ```
 
-Python 3.11+; runtime deps are `pydantic` and `httpx`.
+Python 3.11+; runtime deps are `pydantic` and `httpx`. The `[cli]` extra
+adds `typer` and `rich`.
 
 ## Quickstart
 
@@ -82,6 +84,49 @@ Person(notARealProp="X")     # ValidationError — extra="forbid"
 | `proxy` | `None` | Forwarded to `httpx.Client(proxy=...)`. |
 | `headers` | `None` | Merged onto every request; `Authorization` and `User-Agent` win. |
 | `transport` | `None` | Custom `httpx.BaseTransport` (e.g. `MockTransport` for tests). |
+
+## CLI
+
+`pip install yente-client[cli]` ships a `yente-client` binary that mirrors the SDK:
+
+```bash
+export OPENSANCTIONS_API_KEY=sk_...        # or pass --api-key
+
+# Screen a known entity (KYC / sanctions checks):
+yente-client match -s Person -p firstName=Aleksandr -p lastName=Zacharov -d sanctions
+
+# Free-text discovery by name:
+yente-client search "acme" -d default -s Company
+
+# Fetch one entity (id from match/search):
+yente-client fetch NK-aU5ybkbRFJucf8YMwsJvDw
+
+# Discover the data model (offline, no API key):
+yente-client ref schemas                   # all schemas with matchable flags
+yente-client ref schema Person -f json     # full property list, types, deprecation
+yente-client ref topics                    # the Topic enum
+
+# Discover server state:
+yente-client catalog                       # datasets + freshness
+yente-client algorithms                    # enabled algorithms, default + best
+```
+
+Output formats: `-f table` (default on TTY), `-f json` (pretty, default when piped),
+`-f jsonl` (one item per line, ideal for `jq` and LLM pipelines).
+
+**`search` vs `match`:** use `match` when you have a known entity to screen
+(name + dob + country); use `search` when you have a name fragment to look up.
+
+**Exit codes:**
+- `0` ≥1 result
+- `1` zero results (lets shell scripts gate on `&&`)
+- `2` usage error (bad flag, unknown schema/property)
+- `3` API error (4xx, 5xx)
+- `4` network/transport error
+
+Designed for LLM agents: every command's `--help` carries worked examples and
+documented JSON output shapes; unknown schema/property names get fuzzy
+suggestions ("Did you mean `birthDate`?"). Run `yente-client --help` first.
 
 ## Errors
 

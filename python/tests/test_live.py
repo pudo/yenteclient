@@ -8,7 +8,11 @@ Kept deliberately small — these are smoke tests, not a comprehensive suite.
 They double as a drift detector for the hosted API's response shapes.
 """
 
+import json
+import os
+
 import pytest
+from typer.testing import CliRunner
 
 from yente_client.entities import Person
 from yente_client.models import (
@@ -78,3 +82,21 @@ async def test_async_healthz_returns_ok(live_async_client) -> None:
     r = await live_async_client.healthz()
     assert isinstance(r, StatusResponse)
     assert r.status == "ok"
+
+
+def test_cli_healthz_against_live_api() -> None:
+    """End-to-end CLI smoke: `yente-client healthz` against the real API."""
+    from yente_client.cli.main import app
+
+    key = os.environ.get("OPENSANCTIONS_API_KEY")
+    if not key:
+        pytest.skip("OPENSANCTIONS_API_KEY not set")
+    base_url = os.environ.get("YENTE_BASE_URL", "https://api.test.opensanctions.org")
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["--api-key", key, "--base-url", base_url, "healthz", "-f", "json"],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    parsed = json.loads(result.stdout)
+    assert parsed["status"] == "ok"
