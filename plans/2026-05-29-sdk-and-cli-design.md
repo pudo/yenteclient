@@ -546,8 +546,7 @@ yente-client search QUERY [--datasets default]                    # repeatable
                    [--format json|jsonl|table]
 
 yente-client match  --schema Person                               # entity type to construct
-             [--first-name X] [--last-name Y] [--birth-date 1965]
-             [--property name=Acme]                        # repeatable, schema-agnostic
+             [-p KEY=VALUE] [-p ...]                       # universal property setter; `--property` is the long form
              [--from-file query.json]                      # see format note below
              [--datasets sanctions]                        # repeatable
              [--topics sanction --topics role.pep]
@@ -571,7 +570,9 @@ Notes:
 
 - `--datasets` (plural) is used by both `search` and `match`; the CLI translates the same way the SDK does (first → URL path param, rest → repeated `include_dataset` query params). See §4.8.
 - `--schema` is overloaded by context: on `yente-client search` it filters results by entity type; on `yente-client match` it specifies the type of entity being constructed from the other flags. Acceptable because each command has only one natural meaning for it.
-- `--from-file path.json` (for `yente-client match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the wire-format match query. The CLI looks up the schema name in the bundled model, constructs the matching per-schema class, and feeds it to `match()`. Flag-derived properties merge into / override the file's properties.
+- `--from-file path.json` (for `yente-client match`) reads a JSON document of shape `{"schema": "...", "properties": {...}}` — the wire-format match query. The CLI looks up the schema name in the bundled model, constructs the matching per-schema class, and feeds it to `match()`. Flag-derived properties (`-p KEY=VALUE`) merge into / override the file's properties.
+- `-p` / `--property KEY=VALUE` is the universal property setter on `match`. Repeatable; same key passed twice produces a multi-value property. No per-schema shortcuts (`--first-name` etc.) — the property name on the wire is always what you'd find in the FtM model (`firstName`, `birthDate`, …). Unknown property names fail at construction with a clear pydantic message.
+- The CLI extra `[cli]` pulls in Typer + Rich. Users who install `yente-client` without the extra and try to invoke the binary get a single-line error pointing them at `pip install yente-client[cli]` — see `yente_client.cli._deps` for the import-shim that emits it.
 - CLI flag names follow the v2 conventions (`--datasets`, `--exclude-entities`, `--exclude-schemata`). The translation to v1 is identical to the SDK's.
 
 ### 5.2 Config precedence
