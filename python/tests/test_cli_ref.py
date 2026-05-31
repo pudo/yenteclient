@@ -111,24 +111,20 @@ def test_ref_topics_includes_sanction(runner) -> None:
     assert "role.pep" in names
 
 
-# ---------- ref types ----------
+# ---------- ref countries ----------
 
 
-def test_ref_types_includes_name_and_date(runner) -> None:
-    result = runner.invoke(app, ["ref", "types", "-f", "json"])
+def test_ref_countries_includes_known_codes(runner) -> None:
+    result = runner.invoke(app, ["ref", "countries", "-f", "json"])
     assert result.exit_code == 0
-    types = json.loads(result.stdout)
-    names = {t["name"] for t in types}
-    assert {"name", "address", "date", "country", "topic"} <= names
+    countries = json.loads(result.stdout)
+    codes = {c["code"] for c in countries}
+    # Anchor on stable ISO codes; don't assert exact count.
+    assert {"us", "ru", "gb", "de"} <= codes
 
 
-# ---------- ref genders ----------
-
-
-def test_ref_genders(runner) -> None:
-    result = runner.invoke(app, ["ref", "genders", "-f", "json"])
+def test_ref_countries_table(runner) -> None:
+    result = runner.invoke(app, ["ref", "countries", "-f", "table"])
     assert result.exit_code == 0
-    genders = json.loads(result.stdout)
-    names = {g["name"] for g in genders}
-    assert "male" in names
-    assert "female" in names
+    assert "us" in result.stdout
+    assert "ru" in result.stdout

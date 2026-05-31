@@ -88,14 +88,14 @@ def live_client() -> Iterator[Client]:
     """A ``Client`` against the real yente API.
 
     Skips when ``OPENSANCTIONS_API_KEY`` is unset (CI without secrets,
-    local without .env). ``YENTE_BASE_URL`` overrides the default; we
-    default to the *test* instance so accidental local runs don't hit
-    production. CI sets ``YENTE_BASE_URL`` explicitly via secrets.
+    local without .env). ``YENTE_BASE_URL`` overrides the default
+    (``api.opensanctions.org``). Local dev usually points at the test
+    instance via ``.env``; CI sets ``YENTE_BASE_URL`` explicitly via secrets.
     """
     key = os.environ.get("OPENSANCTIONS_API_KEY")
     if not key:
         pytest.skip("OPENSANCTIONS_API_KEY not set; skipping live tests")
-    base_url = os.environ.get("YENTE_BASE_URL", "https://api.test.opensanctions.org")
+    base_url = os.environ.get("YENTE_BASE_URL", "https://api.opensanctions.org")
     with Client(api_key=key, base_url=base_url, app_name="yenteclient-tests") as client:
         yield client
 
@@ -106,6 +106,6 @@ async def live_async_client():
     key = os.environ.get("OPENSANCTIONS_API_KEY")
     if not key:
         pytest.skip("OPENSANCTIONS_API_KEY not set; skipping live tests")
-    base_url = os.environ.get("YENTE_BASE_URL", "https://api.test.opensanctions.org")
+    base_url = os.environ.get("YENTE_BASE_URL", "https://api.opensanctions.org")
     async with AsyncClient(api_key=key, base_url=base_url, app_name="yenteclient-tests") as client:
         yield client

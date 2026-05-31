@@ -734,62 +734,25 @@ def ref_topics_command(
         print_table(rows, headers=["topic", "label"], title=f"{len(entries)} topic(s)")
 
 
-def ref_types_command(
+def ref_countries_command(
     format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
 ) -> None:
-    """List the FtM property type set (name, address, date, country, ...).
+    """List valid country codes for the ``country`` property type.
 
-    Each entry has a label and (where it's an enum) a value count. Use this
-    to interpret the `type` column shown by ``ref schema NAME``.
+    Use these with ``--countries`` on ``search`` or as values on
+    country-typed properties (``country``, ``nationality``, ``birthCountry``,
+    ``jurisdiction``, …). Sourced from ``model.types["country"].values``.
     """
-    types = model["types"]
-    entries = [
-        {
-            "name": tname,
-            "label": tdef.get("label", ""),
-            "values_count": len(tdef.get("values") or {}),
-            "matchable": bool(tdef.get("matchable", False)),
-        }
-        for tname, tdef in sorted(types.items())
-    ]
-
+    country_values = model["types"].get("country", {}).get("values", {})
+    entries = [{"code": code, "name": name} for code, name in sorted(country_values.items())]
     fmt = resolve_format(format_)
     if fmt == Format.JSON:
         print_json(entries)
     elif fmt == Format.JSONL:
         print_jsonl(entries)
     else:
-        rows = [
-            [
-                e["name"],
-                e["label"],
-                str(e["values_count"]) if e["values_count"] else "",
-                "✓" if e["matchable"] else "",
-            ]
-            for e in entries
-        ]
-        print_table(rows, headers=["type", "label", "values", "matchable"])
-
-
-def ref_genders_command(
-    format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
-) -> None:
-    """List valid Gender enum values.
-
-    Small enum — useful for an agent constructing a Person entity that
-    wants to set `gender` correctly.
-    """
-    values = model["types"].get("gender", {}).get("values", {})
-    entries = [{"name": k, "label": v} for k, v in sorted(values.items())]
-
-    fmt = resolve_format(format_)
-    if fmt == Format.JSON:
-        print_json(entries)
-    elif fmt == Format.JSONL:
-        print_jsonl(entries)
-    else:
-        rows = [[e["name"], e["label"]] for e in entries]
-        print_table(rows, headers=["gender", "label"])
+        rows = [[e["code"], e["name"]] for e in entries]
+        print_table(rows, headers=["code", "name"], title=f"{len(entries)} country code(s)")
 
 
 def _truncate(text: str, max_len: int) -> str:
@@ -821,8 +784,7 @@ def register(app: typer.Typer) -> None:
     ref_app.command("schemas", epilog=_REF_SCHEMAS_EPILOG)(ref_schemas_command)
     ref_app.command("schema", epilog=_REF_SCHEMA_EPILOG)(ref_schema_command)
     ref_app.command("topics")(ref_topics_command)
-    ref_app.command("types")(ref_types_command)
-    ref_app.command("genders")(ref_genders_command)
+    ref_app.command("countries")(ref_countries_command)
     app.add_typer(ref_app, name="ref")
 
 
