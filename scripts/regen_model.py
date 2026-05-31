@@ -47,7 +47,14 @@ def _safe_field_name(prop_name: str) -> tuple[str, str | None]:
         return prop_name + "_", prop_name
     return prop_name, None
 
-DEFAULT_MODEL_URL = "https://data.opensanctions.org/meta/model.json"
+# followthemoney publishes the canonical model.json as a release artifact.
+# The `latest/download` URL 302-redirects to whichever release is currently
+# tagged latest — pinning to a specific version would be safer but also
+# slower-rotting; we deliberately follow upstream here because regen runs
+# are explicit, version-controlled, and pre-release-gated.
+DEFAULT_MODEL_URL = (
+    "https://github.com/opensanctions/followthemoney/releases/latest/download/model.json"
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODEL_FILE = REPO_ROOT / "model" / "model.json"
@@ -118,10 +125,15 @@ def collect_properties(schemata: dict[str, dict[str, Any]], schema_name: str) ->
 
 
 def build_context(model_json: dict[str, Any]) -> dict[str, Any]:
-    """Build the Jinja context from the raw FtM model snapshot."""
-    inner = model_json["model"]
-    schemata = inner["schemata"]
-    types = inner["types"]
+    """Build the Jinja context from the raw FtM model snapshot.
+
+    The payload published as a GitHub release artifact has the shape
+    ``{schemata, types, version}`` — no wrapper, the model is at the top
+    level. (The older ``data.opensanctions.org/meta/model.json`` payload
+    wrapped it under ``["model"]``; that source is no longer used.)
+    """
+    schemata = model_json["schemata"]
+    types = model_json["types"]
 
     schemas = []
     for name in sorted(schemata):

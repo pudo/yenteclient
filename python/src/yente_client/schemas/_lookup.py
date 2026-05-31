@@ -1,8 +1,11 @@
 """Runtime access to the bundled FtM model snapshot.
 
-Loads ``schemas/model.json`` at import time and exposes the inner ``model``
-dict plus four small lookup helpers. No Pydantic-typed wrappers — the codegen
-reads ``model.json`` directly and users who want introspection get dict access.
+Loads ``schemas/model.json`` at import time and exposes it directly plus a
+handful of lookup helpers. No Pydantic-typed wrappers — the codegen reads
+``model.json`` directly and users who want introspection get dict access.
+
+The on-disk file is the followthemoney release artifact verbatim:
+``{schemata, types, version}`` at the top level.
 """
 
 import json
@@ -10,9 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-_RAW: dict[str, Any] = json.loads((Path(__file__).parent / "model.json").read_text())
-
-model: dict[str, Any] = _RAW["model"]
+model: dict[str, Any] = json.loads((Path(__file__).parent / "model.json").read_text())
 
 
 def has_schema(name: str) -> bool:

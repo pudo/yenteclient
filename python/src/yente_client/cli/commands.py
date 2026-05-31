@@ -111,15 +111,15 @@ def _suggest_property(schema: str, prop_name: str) -> str | None:
 # ----- shared helpers -----
 
 
-def _read_model_snapshot_date() -> str:
-    """Return the bundled ``model.json``'s ``run_time`` field as a string."""
+def _read_model_version() -> str:
+    """Return the bundled ``model.json``'s upstream ``version`` (e.g. ``"4.8.4"``)."""
     model_path = Path(__file__).resolve().parent.parent / "schemas" / "model.json"
     try:
         raw: dict[str, Any] = json.loads(model_path.read_text())
     except (OSError, ValueError):
         return "unknown"
-    run_time = raw.get("run_time")
-    return str(run_time) if run_time else "unknown"
+    version = raw.get("version")
+    return str(version) if version else "unknown"
 
 
 def _client_version() -> str:
@@ -217,7 +217,7 @@ def _gather_status(config: CliConfig) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "client": {
             "version": _client_version(),
-            "model_snapshot": _read_model_snapshot_date(),
+            "model_version": _read_model_version(),
         },
         "api": {
             "url": config.base_url,
@@ -275,7 +275,7 @@ def _render_status_table(summary: dict[str, Any]) -> None:
     client_info = summary["client"]
     api = summary["api"]
     typer.echo(f"yente-cli {client_info['version']}")
-    typer.echo(f"Bundled FtM model: {client_info['model_snapshot']}")
+    typer.echo(f"Bundled FtM model: v{client_info['model_version']}")
     typer.echo("")
     typer.echo(f"API:        {api['url']}")
     auth = api["auth"]
@@ -988,7 +988,7 @@ EXAMPLES:
 
 OUTPUT (with -f json):
   {
-    "client": {"version": ..., "model_snapshot": ...},
+    "client": {"version": ..., "model_version": ...},
     "api": {
       "url": ...,
       "auth": {"present": bool, "key_suffix": "..." | null},
