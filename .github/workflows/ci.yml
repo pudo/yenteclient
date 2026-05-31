@@ -43,6 +43,10 @@ jobs:
       - name: regen_model.py --check (drift detector)
         run: python scripts/regen_model.py --check --skip-fetch
 
+      - name: docs build (mkdocs --strict)
+        working-directory: python
+        run: mkdocs build --strict
+
   live-api:
     # Runs only after the offline matrix is green, and only when secrets are
     # available — i.e. on push to main or on PRs from the same repo. PRs from
