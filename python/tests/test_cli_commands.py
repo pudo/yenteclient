@@ -136,6 +136,71 @@ def test_fetch_json(runner, load_fixture) -> None:
     assert parsed["schema"] == "Person"
 
 
+def test_search_table(runner, load_fixture) -> None:
+    payload = load_fixture("search_basic")
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.get(url__regex=r".*/search/.*").mock(return_value=httpx.Response(200, json=payload))
+        result = runner.invoke(app, [*_BASE_FLAGS, "search", "acme", "-f", "table"])
+    assert result.exit_code == 0
+    assert "Acme" in result.stdout
+    assert "Person" in result.stdout or "Company" in result.stdout
+
+
+def test_search_json(runner, load_fixture) -> None:
+    payload = load_fixture("search_basic")
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.get(url__regex=r".*/search/.*").mock(return_value=httpx.Response(200, json=payload))
+        result = runner.invoke(app, [*_BASE_FLAGS, "search", "acme", "-f", "json"])
+    assert result.exit_code == 0
+    parsed = json.loads(result.stdout)
+    assert "results" in parsed
+    assert len(parsed["results"]) == 2
+
+
+def test_search_empty_results_exits_one(runner, load_fixture) -> None:
+    payload = load_fixture("search_no_results")
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.get(url__regex=r".*/search/.*").mock(return_value=httpx.Response(200, json=payload))
+        result = runner.invoke(app, [*_BASE_FLAGS, "search", "zzzz", "-f", "json"])
+    assert result.exit_code == 1
+
+
+def test_search_passes_dataset_and_schema_filters(runner, load_fixture) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=load_fixture("search_no_results"))
+
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.get(url__regex=r".*/search/.*").mock(side_effect=handler)
+        result = runner.invoke(
+            app,
+            [
+                *_BASE_FLAGS,
+                "search",
+                "acme",
+                "-d",
+                "sanctions",
+                "-d",
+                "us_ofac_sdn",
+                "-s",
+                "Company",
+                "-t",
+                "sanction",
+                "-f",
+                "json",
+            ],
+        )
+    # Exit 1 because we mocked an empty payload, but the request should have
+    # gone out with the right URL and params.
+    assert result.exit_code == 1
+    assert seen[0].url.path == "/search/sanctions"
+    assert seen[0].url.params.get("schema") == "Company"
+    assert seen[0].url.params.get("topics") == "sanction"
+    assert seen[0].url.params.get_list("include_dataset") == ["us_ofac_sdn"]
+
+
 def test_fetch_no_nested_flag(runner, load_fixture) -> None:
     captured: list[str] = []
     payload = load_fixture("entity_person")

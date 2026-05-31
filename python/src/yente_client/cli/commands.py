@@ -198,6 +198,101 @@ def fetch_command(
         _print_entity_summary(entity)
 
 
+def search_command(
+    ctx: typer.Context,
+    q: str = typer.Argument(..., help="Free-text query (name fragment, identifier, ...)."),
+    datasets: list[str] | None = typer.Option(
+        None,
+        "--datasets",
+        "-d",
+        help="Restrict to dataset(s). Repeatable. Default: `default` (combined dataset).",
+    ),
+    schema: str | None = typer.Option(
+        None, "--schema", "-s", help="Restrict to one entity type, e.g. `Person`, `Company`."
+    ),
+    topics: list[str] | None = typer.Option(
+        None,
+        "--topics",
+        "-t",
+        help="Filter by risk topic(s), e.g. `sanction`, `role.pep`. Repeatable.",
+    ),
+    countries: list[str] | None = typer.Option(
+        None, "--countries", help="Filter by ISO country code(s). Repeatable."
+    ),
+    filter_: list[str] | None = typer.Option(
+        None,
+        "--filter",
+        help="Property filter `field:value` (e.g. `properties.birthDate:1965`). Repeatable.",
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", "-l", help="Results per page (server default 10)."
+    ),
+    offset: int = typer.Option(0, "--offset", help="Pagination offset."),
+    sort: list[str] | None = typer.Option(None, "--sort", help="Sort key(s). Repeatable."),
+    fuzzy: bool = typer.Option(False, "--fuzzy", help="Allow fuzzy query syntax."),
+    simple: bool = typer.Option(False, "--simple", help="Use the simple-query parser."),
+    format_: Format = typer.Option(Format.AUTO, "--format", "-f", help=_FORMAT_HELP),
+) -> None:
+    """Free-text search across one or more datasets.
+
+    Use `match` instead when you have a known entity (name + dob + country)
+    and want to screen it against risk lists; `search` ranks by text
+    relevance, `match` by entity-shape scoring.
+
+    Exits 1 (no results) when the query returns zero hits, so shell scripts
+    can gate on `yente-client search … && …`.
+    """
+    config: CliConfig = ctx.obj
+
+    search_kwargs: dict[str, Any] = {}
+    if datasets:
+        search_kwargs["datasets"] = datasets
+    if schema:
+        search_kwargs["schema"] = schema
+    if topics:
+        search_kwargs["topics"] = topics
+    if countries:
+        search_kwargs["countries"] = countries
+    if filter_:
+        search_kwargs["filter"] = filter_
+
+    with config.make_client() as client:
+        response = client.search(
+            q,
+            limit=limit,
+            offset=offset,
+            sort=sort or None,
+            fuzzy=fuzzy,
+            simple=simple,
+            **search_kwargs,
+        )
+
+    fmt = resolve_format(format_)
+    if fmt == Format.JSON:
+        print_json(response)
+    elif fmt == Format.JSONL:
+        print_jsonl(response.results)
+    else:
+        rows = [
+            [
+                r.id,
+                r.caption,
+                r.schema_,
+                ", ".join(r.datasets[:3]),
+                ", ".join(t for t in r.properties.get("topics", []) if isinstance(t, str)),
+            ]
+            for r in response.results
+        ]
+        print_table(
+            rows,
+            headers=["id", "caption", "schema", "datasets", "topics"],
+            title=f"total={response.total.value}{'+' if response.total.relation == 'gte' else ''}",
+        )
+
+    if not response.results:
+        raise typer.Exit(code=1)
+
+
 def _print_entity_summary(entity: Entity) -> None:
     """Render an entity as a key-value summary table for TTY output.
 
@@ -227,3 +322,4 @@ def register(app: typer.Typer) -> None:
     app.command("catalog")(catalog_command)
     app.command("algorithms")(algorithms_command)
     app.command("fetch")(fetch_command)
+    app.command("search")(search_command)
