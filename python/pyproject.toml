@@ -65,6 +65,11 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 # schemas/_literals.py) carry a `# ruff: noqa` header from the template
 # rather than being excluded here.
 
+[tool.ruff.lint.per-file-ignores]
+# Typer's idiom is `... = typer.Option(...)` in function defaults; B008
+# (function call in default) doesn't apply.
+"src/yente_client/cli/*.py" = ["B008"]
+
 [tool.ruff.format]
 quote-style = "double"
 
