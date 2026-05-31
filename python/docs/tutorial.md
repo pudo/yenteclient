@@ -1,8 +1,14 @@
 # Get started with the yente-client Python SDK
 
-A linear walk through the SDK: install → first match → matching in depth →
-fetch → search → async → errors → entities. If you want shell access
-rather than Python, see the [CLI overview](cli.md) instead.
+A linear walk through the Python SDK: install, first match, matching
+in depth, fetch, search, async, errors, and entities.
+
+If you want shell access rather than Python, see the
+[CLI overview](cli.md) instead. The
+[FollowTheMoney](https://followthemoney.tech/) (FtM) data model
+underlies every entity returned by these endpoints; on first contact
+with FtM, the [tutorial on the FtM model](#8-entities-and-the-ftm-model)
+in section 8 is a useful entry point.
 
 ## 1. Install and authenticate
 
@@ -32,7 +38,7 @@ with Client() as client:
     # StatusResponse(status='ok')
 ```
 
-`Client` is a context manager — use `with Client() as client:` for
+`Client` is a context manager. Use `with Client() as client:` for
 deterministic cleanup of the underlying `httpx.Client`.
 
 ## 2. Your first match
@@ -42,8 +48,8 @@ entity description, find candidate matches in OpenSanctions data.
 
 ### Construct an entity
 
-Every FtM schema has a Python class. Construct one with the property
-fields you know:
+Every FollowTheMoney (FtM) schema has a Python class. Construct one
+with the property fields you know:
 
 ```python
 from yente_client import Client, Person
@@ -55,9 +61,9 @@ query = Person(
 )
 ```
 
-Property names are FtM **camelCase** — `firstName`, `birthDate`,
-`nationality`, `passportNumber` — matching the wire format. Use
-[`yente-cli ref schema Person`](cli.md) (or the
+Property names use FtM **camelCase** (`firstName`, `birthDate`,
+`nationality`, `passportNumber`) and match the wire format exactly.
+Use [`yente-cli ref schema Person`](cli.md) (or the
 [`Person` API reference](api/entities.md)) to discover what properties
 each schema accepts.
 
@@ -112,7 +118,7 @@ response = client.match(query, threshold=0.5)
 ### Choosing an algorithm
 
 The server exposes several scoring algorithms. `BEST_ALGORITHM` resolves
-to whichever the server currently recommends — pass it for
+to whichever the server currently recommends. Pass it for
 forward-compatibility:
 
 ```python
@@ -142,9 +148,9 @@ When both are supplied, the kwargs win on any field they specify.
 
 ### Schema-level matchable: the SDK refuses non-matchable schemas
 
-Yente refuses `/match` queries against non-matchable schemas
-(`Document`, `Article`, `Vehicle`, …). The SDK preempts this client-side
-and raises `ConfigurationError` before the round-trip:
+The server refuses `/match` queries against non-matchable schemas
+(`Document`, `Article`, `Vehicle`, …). The SDK preempts the refusal
+client-side and raises `ConfigurationError` before the round-trip:
 
 ```python
 from yente_client import Document
@@ -163,25 +169,25 @@ Use `yente-cli ref schemas --matchable` (or
 ### Property-level: "directly scored" is a narrow signal
 
 Per-property `matchable` in the FtM model marks properties that
-contribute to a match score as a **primary** matching feature. Properties
-without it can still meaningfully impact match results — sending them is
-generally fine and often helpful:
+contribute to a match score as a **primary** matching feature.
+Properties without the flag can still meaningfully impact match
+results. Sending them is generally fine, and often helpful:
 
 - **Name parts** (`firstName`, `middleName`, `lastName`, `fatherName`, …)
   get folded into a synthesized `name` value if no name is set.
-- **`weakAlias` / `abbreviation`** are cross-compared against candidate
-  names during scoring.
-- **`gender`** acts as a mismatch penalty — disagreement lowers the
+- **`weakAlias` and `abbreviation`** are cross-compared against
+  candidate names during scoring.
+- **`gender`** acts as a mismatch penalty: disagreement lowers the
   score.
 
 The `directly_scored` flag shown in `yente-cli ref schema NAME` reflects
-the model's per-property flag (with type-level defaulting). Treat it as
-"primary scoring input?" — not "useful?".
+the model's per-property flag (with type-level defaulting). Read it as
+"primary scoring input?", not "useful?".
 
 ## 4. Fetch and adjacency
 
-Given an entity ID — typically from a match result, search hit, or an
-external system — fetch the full record:
+Given an entity ID (typically from a match result, search hit, or an
+external system), fetch the full record:
 
 ```python
 entity = client.fetch("NK-aU5ybkbRFJucf8YMwsJvDw")
@@ -192,8 +198,9 @@ print(entity.properties.get("topics"))
 ### Nested vs flat
 
 `fetch()` returns nested entities by default (when properties reference
-other entities, those are expanded inline). Pass `nested=False` for the
-flat shape — useful in data pipelines where you don't want to recurse:
+other entities, those are expanded inline). For the flat shape, pass
+`nested=False`. This is useful in data pipelines where you don't want
+to recurse:
 
 ```python
 flat = client.fetch(entity_id, nested=False)
@@ -201,7 +208,7 @@ flat = client.fetch(entity_id, nested=False)
 
 ### Adjacent entities
 
-The adjacency endpoint exposes paged neighbours by property name:
+The adjacency endpoint exposes paged neighbors by property name:
 
 ```python
 # All adjacencies, grouped by property:
@@ -221,11 +228,11 @@ See [`AdjacentResponse`](api/models.md) and
 ## 5. Search (for user-facing search UIs)
 
 `search()` is a **different use case** from matching. Reach for it when
-you're building an end-user search experience — autocomplete fields,
+you're building an end-user search experience: autocomplete fields,
 browse pages, search-this-database forms where a human is typing into
 the input.
 
-For any matching task — including those with very partial input — use
+For any matching task, including those with very partial input, use
 `match()`. `search()` is not a fallback for incomplete data.
 
 ```python
@@ -241,7 +248,7 @@ schema, free-text `filter:` clauses, facets).
 ## 6. Async
 
 `AsyncClient` mirrors `Client` method-for-method. Use it when running
-many requests concurrently — the network is the bottleneck, and async
+many requests concurrently: the network is the bottleneck, and async
 lets one event loop juggle hundreds of in-flight requests.
 
 ```python
@@ -296,7 +303,7 @@ except TransportError:
 ```
 
 Input-shape errors (typo in a property name, wrong value type) surface
-as `pydantic.ValidationError` — we don't wrap or alias it.
+as `pydantic.ValidationError`. The SDK does not wrap or alias it.
 
 Retries are **not** built in. The client raises; callers handle backoff.
 See [`exceptions`](api/exceptions.md) for full per-class details.
@@ -328,7 +335,7 @@ See [`schemas`](api/schemas.md) for the full lookup helper set.
 
 ### Updating the bundled model
 
-The model is a *snapshot* — pinned at SDK-release time. Properties added
+The model is a *snapshot*, pinned at SDK-release time. Properties added
 upstream don't appear until the next SDK release. Maintainers run
 `make regen-model` to refresh.
 

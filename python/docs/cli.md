@@ -1,13 +1,11 @@
 # yente-cli — command-line overview
 
-The `yente-cli` binary ships with the `yente-client[cli]` install extra.
-It mirrors the SDK surface — same matching, search, fetch, server-state
-endpoints — and is designed for one-off lookups, shell pipelines, and
-LLM-agent automations.
+The `yente-cli` command-line tool mirrors the Python SDK surface and
+serves one-off lookups, shell pipelines, and LLM-agent automations.
 
-This page is the overview. For per-command detail (every option, every
-exit code, output JSON shape, worked examples), run
-`yente-cli <command> --help`.
+It ships with the `yente-client[cli]` install extra. Per-command
+detail (every option, every exit code, output JSON shape, worked
+examples) lives in `yente-cli <command> --help`.
 
 ## When to reach for the CLI vs the SDK
 
@@ -43,16 +41,16 @@ To point at a self-hosted yente, set `YENTE_BASE_URL` or pass
 | Command | One-line |
 |---|---|
 | `match` | Match a single entity (built from `-p key=value` flags or `--from-file`) against a dataset. The canonical command for any matching task. |
-| `search` | Free-text search across one or more datasets — for backing user-facing search UIs. |
+| `search` | Free-text search across one or more datasets, for backing user-facing search UIs. |
 | `fetch` | Fetch one entity by ID. |
 | `catalog` | List indexed datasets and their freshness. |
-| `algorithms` | List enabled matching algorithms + the server defaults. |
-| `status` | Client setup + server health + loaded datasets, at a glance. |
+| `algorithms` | List enabled matching algorithms and the server defaults. |
+| `status` | Client setup, server health, and loaded datasets, at a glance. |
 | `healthz` | Liveness probe only. |
-| `ref schemas` | List every FtM schema (offline; uses bundled snapshot). |
+| `ref schemas` | List every FollowTheMoney (FtM) schema (offline; uses bundled snapshot). |
 | `ref schema NAME` | Detail view: properties, types, `directly_scored` flag, deprecation. |
-| `ref topics` | The `Topic` enum (sanction, role.pep, crime.fraud, …). |
-| `ref countries` | The country-code → label lookup. |
+| `ref topics` | The `Topic` enum (`sanction`, `role.pep`, `crime.fraud`, …). |
+| `ref countries` | The country-code to label lookup. |
 
 `yente-cli --help` carries the full workflow block; per-command
 `--help` carries worked examples, OUTPUT-shape blocks, and EXIT-CODE
@@ -62,10 +60,10 @@ tables.
 
 Every command takes `-f` / `--format`:
 
-- **`-f table`** — Rich table, the default on a TTY.
-- **`-f json`** — pretty JSON, the default when piped.
-- **`-f jsonl`** — one item per line. Ideal for `jq` pipelines and LLM
-  consumption.
+- **`-f table`**: rich table, the default on a TTY.
+- **`-f json`**: pretty JSON, the default when piped.
+- **`-f jsonl`**: one item per line. Suitable for `jq` pipelines and
+  LLM consumption.
 
 ## Exit codes
 
@@ -73,9 +71,9 @@ Every command takes `-f` / `--format`:
 |---|---|
 | `0` | Success, at least one result (or any successful response for `fetch` / `catalog`). |
 | `1` | Success, zero results. Lets shell scripts gate on `match … && action`. |
-| `2` | Usage error — bad flag, unknown schema, malformed `-p key=value`. |
-| `3` | API error — non-2xx response. |
-| `4` | Transport error — network, timeout, TLS. |
+| `2` | Usage error: bad flag, unknown schema, malformed `-p key=value`. |
+| `3` | API error: non-2xx response. |
+| `4` | Transport error: network, timeout, TLS. |
 
 ## Worked examples
 
@@ -130,9 +128,9 @@ Run `yente-cli --help` first.
 
 ## Where to go next
 
-- [SDK tutorial](tutorial.md) — embedded Python usage; the matching
+- [SDK tutorial](tutorial.md): embedded Python usage and the matching
   workflow in depth.
-- [API reference](api/index.md) — full signatures of every public symbol.
-- [OpenSanctions docs](https://www.opensanctions.org/docs/) — domain
+- [API reference](api/index.md): full signatures of every public symbol.
+- [OpenSanctions docs](https://www.opensanctions.org/docs/) for domain
   context (sanctions screening, the FtM data model, the hosted-API
-  quickstart, account / API-key page).
+  quickstart, the account / API-key page).
